@@ -36,12 +36,26 @@ async fn run_writer(
     let mut interval = tokio::time::interval(flush_interval);
     interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
     let mut total_rows: u64 = 0;
+    let mut total_requests: u64 = 0;
+
+    // Stats reporting
+    let mut stats_interval = tokio::time::interval(Duration::from_secs(5));
+    stats_interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+    let mut last_report_rows: u64 = 0;
+    let mut last_report_time = tokio::time::Instant::now();
+    let mut first_data_received = false;
 
     loop {
         tokio::select! {
             batch = rx.recv() => {
                 match batch {
                     Some(points) => {
+                        if !first_data_received {
+                            first_data_received = true;
+                            tracing::info!("First data received, ingestion started");
+                            last_report_time = tokio::time::Instant::now();
+                        }
+                        total_requests += 1;
                         buffer.extend(points);
                         if buffer.len() >= batch_size {
                             total_rows += flush(&storage, &jsonl, &mut buffer).await;
@@ -68,6 +82,20 @@ async fn run_writer(
                         break;
                     }
                 }
+            }
+            _ = stats_interval.tick(), if first_data_received => {
+                let elapsed = last_report_time.elapsed();
+                let new_rows = total_rows - last_report_rows;
+                let rate = new_rows as f64 / elapsed.as_secs_f64();
+                tracing::info!(
+                    "Stats: {total_rows} total rows, {total_requests} requests | \
+                     {new_rows} rows in {:.1}s ({:.0} rows/s), buffer={}",
+                    elapsed.as_secs_f64(),
+                    rate,
+                    buffer.len(),
+                );
+                last_report_rows = total_rows;
+                last_report_time = tokio::time::Instant::now();
             }
         }
     }
