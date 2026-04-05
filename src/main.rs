@@ -71,22 +71,28 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     tokio::select! {
         _ = tokio::signal::ctrl_c() => {
             tracing::info!("Received Ctrl+C, shutting down...");
+            // Abort servers and wait for them to actually drop their senders
+            grpc_handle.abort();
+            http_handle.abort();
+            let _ = grpc_handle.await;
+            let _ = http_handle.await;
         }
         _ = async {
             let (_, _) = tokio::join!(&mut grpc_handle, &mut http_handle);
         } => {
             tracing::error!("All servers exited, shutting down...");
+            // Both tasks already completed — senders already dropped
         }
     }
 
-    // Abort any still-running server tasks, then drop all senders
-    grpc_handle.abort();
-    http_handle.abort();
+    // Drop main's sender — now all senders are gone
     drop(tx);
 
-    // Writer will see channel closed (all senders dropped) and flush remaining data
-    if let Err(e) = writer_handle.await {
-        tracing::error!("Writer task error: {e}");
+    // Writer will flush remaining data and exit (with timeout safety net)
+    match tokio::time::timeout(Duration::from_secs(10), writer_handle).await {
+        Ok(Ok(())) => {}
+        Ok(Err(e)) => tracing::error!("Writer task error: {e}"),
+        Err(_) => tracing::warn!("Writer shutdown timed out after 10s, forcing exit"),
     }
 
     // Build analysis indexes after writing is complete
