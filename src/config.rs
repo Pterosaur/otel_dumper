@@ -2,7 +2,10 @@ use clap::Parser;
 use std::path::PathBuf;
 
 #[derive(Parser, Debug, Clone)]
-#[command(name = "otel_dumper", about = "OTLP Metrics receiver that dumps data to SQLite")]
+#[command(
+    name = "otel_dumper",
+    about = "OTLP Metrics receiver that dumps data to SQLite"
+)]
 pub struct Config {
     /// gRPC server port (OTLP/gRPC)
     #[arg(long, default_value_t = 4317)]
