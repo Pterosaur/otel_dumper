@@ -44,3 +44,47 @@ jobs:
 
       - name: Check formatting
         run: cargo fmt -- --check
+
+      - name: Upload binary artifact
+        if: github.event_name == 'push' && github.ref == 'refs/heads/master'
+        uses: actions/upload-artifact@v4
+        with:
+          name: otel_dumper-x86_64-linux
+          path: target/x86_64-unknown-linux-musl/release/otel_dumper
+
+  release:
+    name: Update Latest Release
+    needs: check
+    if: github.event_name == 'push' && github.ref == 'refs/heads/master'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download binary artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: otel_dumper-x86_64-linux
+          path: ./artifact
+
+      - name: Prepare binary
+        run: |
+          chmod +x ./artifact/otel_dumper
+          mv ./artifact/otel_dumper ./otel_dumper-x86_64-linux
+
+      - name: Update latest release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: latest
+          name: Latest Build
+          body: |
+            Automatically built from `master` branch (commit ${{ github.sha }}).
+
+            ## Download
+
+            - `otel_dumper-x86_64-linux`: Statically linked binary for x86_64 Linux
+          draft: false
+          prerelease: false
+          make_latest: true
+          files: otel_dumper-x86_64-linux
