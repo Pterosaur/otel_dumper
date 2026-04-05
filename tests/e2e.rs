@@ -1,7 +1,7 @@
 //! End-to-end test: start full server stack, send OTLP metrics via both
-//! gRPC and HTTP, verify data lands correctly in SQLite.
+//! gRPC (over network) and HTTP (via tower), verify data lands correctly in SQLite and JSONL.
 
-use otel_dumper::{grpc_server, http_server, storage, writer};
+use otel_dumper::{grpc_server, http_server, jsonl_writer, storage, writer};
 
 use opentelemetry_proto::tonic::{
     collector::metrics::v1::{
@@ -205,14 +205,17 @@ async fn test_e2e_full_pipeline() {
 
     let dir = tempfile::tempdir().unwrap();
     let db_path = dir.path().join("e2e_test.db");
+    let jsonl_path = dir.path().join("e2e_test.jsonl");
 
     // --- Start the full server stack ---
     let storage = Arc::new(storage::Storage::new(&db_path).unwrap());
+    let jsonl = Arc::new(jsonl_writer::JsonlWriter::new(&jsonl_path).unwrap());
     let (tx, rx) = mpsc::channel(1000);
 
     let writer_handle = writer::start_writer(
         rx,
         storage.clone(),
+        Some(jsonl),
         100, // small batch for testing
         Duration::from_millis(100),
         0,
@@ -427,4 +430,29 @@ async fn test_e2e_full_pipeline() {
         index_count >= 3,
         "Expected at least 3 indexes (idx_ts + 2 analysis), got {index_count}"
     );
+
+    // 11. Verify JSONL output
+    let jsonl_content = std::fs::read_to_string(&jsonl_path).unwrap();
+    let jsonl_lines: Vec<&str> = jsonl_content.lines().collect();
+    assert_eq!(
+        jsonl_lines.len(),
+        8,
+        "Expected 8 JSONL lines, got {}",
+        jsonl_lines.len()
+    );
+
+    // Every line should be valid JSON with expected fields
+    for line in &jsonl_lines {
+        let parsed: serde_json::Value = serde_json::from_str(line).unwrap();
+        assert!(parsed["timestamp_ns"].is_number());
+        assert!(parsed["metric_name"].is_string());
+        assert!(parsed["metric_type"].is_string());
+    }
+
+    // Verify a specific JSONL entry
+    let first: serde_json::Value = serde_json::from_str(jsonl_lines[0]).unwrap();
+    assert!(first["resource_attrs"]
+        .as_str()
+        .unwrap()
+        .contains("e2e-test-service"));
 }

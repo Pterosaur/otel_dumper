@@ -1,6 +1,6 @@
 # otel_dumper
 
-一个 OpenTelemetry Collector 模拟器，接收 OTLP Metrics 数据并落盘到 SQLite 数据库，用于离线分析和 Grafana 可视化。
+一个 OpenTelemetry Collector 模拟器，接收 OTLP Metrics 数据并落盘到 SQLite 数据库和/或 JSONL 文件，用于离线分析和 Grafana 可视化。
 
 [English](README.md)
 
@@ -10,6 +10,7 @@
 
 - **双协议支持**: gRPC (`:4317`) 和 HTTP (`:4318`) OTLP 端点
 - **高吞吐**: 针对 ~10万 data points/秒 设计，批量写入 SQLite
+- **双输出格式**: SQLite 用于 Grafana 查询 + 可选 JSONL 用于本地直观阅读
 - **Grafana 就绪**: 使用 [SQLite 数据源插件](https://grafana.com/grafana/plugins/frser-sqlite-datasource/) 直接查询和可视化，无需额外代码
 - **单文件静态二进制**: 使用 musl 全静态链接，直接 `scp` 到任意 Linux 机器运行
 - **全指标类型**: Gauge、Sum (Counter)、Histogram、Exponential Histogram、Summary
@@ -46,14 +47,18 @@ ls target/x86_64-unknown-linux-musl/release/otel_dumper
 ### 运行
 
 ```bash
-# 默认端口：gRPC=4317, HTTP=4318
+# 默认：仅 SQLite 输出
 ./otel_dumper
+
+# 同时输出 JSONL，方便本地阅读
+./otel_dumper --jsonl-path ./metrics.jsonl
 
 # 自定义配置
 ./otel_dumper \
   --grpc-port 14317 \
   --http-port 14318 \
   --db-path ./metrics.db \
+  --jsonl-path ./metrics.jsonl \
   --batch-size 50000 \
   --flush-interval-ms 500 \
   --max-rows 100000000
@@ -66,10 +71,38 @@ ls target/x86_64-unknown-linux-musl/release/otel_dumper
 | `--grpc-port` | `4317` | gRPC OTLP 服务端口 |
 | `--http-port` | `4318` | HTTP OTLP 服务端口 |
 | `--db-path` | `metrics.db` | SQLite 数据库文件路径 |
+| `--jsonl-path` | *（无）* | JSONL 输出文件路径（可选，用于本地直观阅读） |
 | `--batch-size` | `50000` | 积累多少数据点后批量写入 SQLite |
 | `--flush-interval-ms` | `500` | 定时刷盘间隔（毫秒），即使批次未满也会写入 |
 | `--channel-capacity` | `10000` | 内部通道缓冲大小 |
 | `--max-rows` | `0` | 最大写入行数，0 表示不限制 |
+
+## JSONL 输出
+
+指定 `--jsonl-path` 后，每个数据点会同时以 JSON 行的形式写入文件，方便本地直观阅读：
+
+```bash
+./otel_dumper --jsonl-path metrics.jsonl
+```
+
+每行是一个完整的 JSON 对象：
+
+```json
+{"timestamp_ns":1712345678000000000,"metric_name":"cpu.usage","metric_type":"gauge","resource_attrs":"{\"service.name\":\"my-app\"}","scope_name":"my-meter","value_double":72.5,"flags":0}
+```
+
+可用标准工具快速检索：
+
+```bash
+# 美化打印最后 5 条
+tail -5 metrics.jsonl | jq .
+
+# 按指标名过滤
+grep '"metric_name":"cpu.usage"' metrics.jsonl | jq .value_double
+
+# 统计每个指标的数据点数
+jq -r .metric_name metrics.jsonl | sort | uniq -c | sort -rn
+```
 
 ## Grafana 集成
 

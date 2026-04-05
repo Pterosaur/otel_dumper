@@ -1,6 +1,6 @@
 use clap::Parser;
 use otel_dumper::config::Config;
-use otel_dumper::{grpc_server, http_server, storage, writer};
+use otel_dumper::{grpc_server, http_server, jsonl_writer, storage, writer};
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -16,23 +16,33 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let config = Config::parse();
 
     tracing::info!(
-        "Starting otel_dumper: gRPC={}, HTTP={}, db={}, batch_size={}, flush_interval={}ms",
+        "Starting otel_dumper: gRPC={}, HTTP={}, db={}, batch_size={}, flush_interval={}ms{}",
         config.grpc_port,
         config.http_port,
         config.db_path.display(),
         config.batch_size,
         config.flush_interval_ms,
+        config
+            .jsonl_path
+            .as_ref()
+            .map(|p| format!(", jsonl={}", p.display()))
+            .unwrap_or_default(),
     );
 
     let storage = Arc::new(
         storage::Storage::new(&config.db_path).expect("Failed to initialize SQLite database"),
     );
 
+    let jsonl = config.jsonl_path.as_ref().map(|path| {
+        Arc::new(jsonl_writer::JsonlWriter::new(path).expect("Failed to open JSONL output file"))
+    });
+
     let (tx, rx) = tokio::sync::mpsc::channel(config.channel_capacity);
 
     let writer_handle = writer::start_writer(
         rx,
         storage.clone(),
+        jsonl,
         config.batch_size,
         Duration::from_millis(config.flush_interval_ms),
         config.max_rows,

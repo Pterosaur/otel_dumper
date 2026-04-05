@@ -8,6 +8,7 @@ use opentelemetry_proto::tonic::{
 };
 
 /// Flattened data point ready for SQLite insertion.
+#[derive(serde::Serialize)]
 pub struct FlatDataPoint {
     pub timestamp_ns: i64,
     pub metric_name: String,

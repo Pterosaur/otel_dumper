@@ -1,6 +1,6 @@
 # otel_dumper
 
-An OpenTelemetry Collector simulator that receives OTLP Metrics data and dumps it into a SQLite database for offline analysis and Grafana visualization.
+An OpenTelemetry Collector simulator that receives OTLP Metrics data and dumps it into a SQLite database and/or JSONL file for offline analysis and Grafana visualization.
 
 [中文文档](README_CN.md)
 
@@ -10,6 +10,7 @@ An OpenTelemetry Collector simulator that receives OTLP Metrics data and dumps i
 
 - **Dual protocol support**: gRPC (`:4317`) and HTTP (`:4318`) OTLP endpoints
 - **High throughput**: Designed for ~100K data points/sec with batched SQLite writes
+- **Dual output format**: SQLite for Grafana queries + optional JSONL for human-readable local inspection
 - **Grafana ready**: Use the [SQLite datasource plugin](https://grafana.com/grafana/plugins/frser-sqlite-datasource/) to query and visualize directly — no custom code needed
 - **Single static binary**: Statically linked with musl, just `scp` to any Linux machine and run
 - **All metric types**: Gauge, Sum (Counter), Histogram, Exponential Histogram, Summary
@@ -46,14 +47,18 @@ ls target/x86_64-unknown-linux-musl/release/otel_dumper
 ### Run
 
 ```bash
-# Default ports: gRPC=4317, HTTP=4318
+# Default: SQLite only
 ./otel_dumper
+
+# With JSONL output for local inspection
+./otel_dumper --jsonl-path ./metrics.jsonl
 
 # Custom configuration
 ./otel_dumper \
   --grpc-port 14317 \
   --http-port 14318 \
   --db-path ./metrics.db \
+  --jsonl-path ./metrics.jsonl \
   --batch-size 50000 \
   --flush-interval-ms 500 \
   --max-rows 100000000
@@ -66,10 +71,38 @@ ls target/x86_64-unknown-linux-musl/release/otel_dumper
 | `--grpc-port` | `4317` | gRPC OTLP server port |
 | `--http-port` | `4318` | HTTP OTLP server port |
 | `--db-path` | `metrics.db` | SQLite database file path |
+| `--jsonl-path` | *(none)* | JSONL output file path (optional, for local inspection) |
 | `--batch-size` | `50000` | Flush to SQLite after this many data points |
 | `--flush-interval-ms` | `500` | Flush interval even if batch is not full |
 | `--channel-capacity` | `10000` | Internal channel buffer size |
 | `--max-rows` | `0` | Max rows to write, 0=unlimited |
+
+## JSONL Output
+
+When `--jsonl-path` is specified, every data point is also written as a JSON line for easy local inspection:
+
+```bash
+./otel_dumper --jsonl-path metrics.jsonl
+```
+
+Each line is a self-contained JSON object:
+
+```json
+{"timestamp_ns":1712345678000000000,"metric_name":"cpu.usage","metric_type":"gauge","resource_attrs":"{\"service.name\":\"my-app\"}","scope_name":"my-meter","value_double":72.5,"flags":0}
+```
+
+Useful for quick inspection with standard tools:
+
+```bash
+# Pretty-print the last 5 entries
+tail -5 metrics.jsonl | jq .
+
+# Filter by metric name
+grep '"metric_name":"cpu.usage"' metrics.jsonl | jq .value_double
+
+# Count data points per metric
+jq -r .metric_name metrics.jsonl | sort | uniq -c | sort -rn
+```
 
 ## Grafana Integration
 
