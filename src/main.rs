@@ -48,28 +48,38 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         config.max_rows,
     );
 
-    let grpc_handle = tokio::spawn({
+    let mut grpc_handle = tokio::spawn({
         let tx = tx.clone();
+        let port = config.grpc_port;
         async move {
-            if let Err(e) = grpc_server::run(tx, config.grpc_port).await {
+            if let Err(e) = grpc_server::run(tx, port).await {
                 tracing::error!("gRPC server failed: {e}");
             }
         }
     });
-    let http_handle = tokio::spawn({
+    let mut http_handle = tokio::spawn({
         let tx = tx.clone();
+        let port = config.http_port;
         async move {
-            if let Err(e) = http_server::run(tx, config.http_port).await {
+            if let Err(e) = http_server::run(tx, port).await {
                 tracing::error!("HTTP server failed: {e}");
             }
         }
     });
 
-    // Wait for Ctrl+C
-    tokio::signal::ctrl_c().await?;
-    tracing::info!("Received Ctrl+C, shutting down...");
+    // Wait for Ctrl+C, or both servers dying (e.g. port conflict)
+    tokio::select! {
+        _ = tokio::signal::ctrl_c() => {
+            tracing::info!("Received Ctrl+C, shutting down...");
+        }
+        _ = async {
+            let (_, _) = tokio::join!(&mut grpc_handle, &mut http_handle);
+        } => {
+            tracing::error!("All servers exited, shutting down...");
+        }
+    }
 
-    // Abort server tasks, then drop all senders so writer can finish
+    // Abort any still-running server tasks, then drop all senders
     grpc_handle.abort();
     http_handle.abort();
     drop(tx);
