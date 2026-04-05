@@ -33,7 +33,17 @@ Client (OTLP)
 
 ## 快速开始
 
-### 构建
+### 下载
+
+预编译的静态二进制可从 [GitHub Releases](https://github.com/Pterosaur/otel_dumper/releases) 获取：
+
+```bash
+curl -LO https://github.com/Pterosaur/otel_dumper/releases/download/latest/otel_dumper-x86_64-linux
+chmod +x otel_dumper-x86_64-linux
+./otel_dumper-x86_64-linux --help
+```
+
+### 从源码构建
 
 ```bash
 # 需要 Rust 工具链和 musl 目标

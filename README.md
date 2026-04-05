@@ -33,7 +33,17 @@ Client (OTLP)
 
 ## Quick Start
 
-### Build
+### Download
+
+Pre-built static binaries are available from [GitHub Releases](https://github.com/Pterosaur/otel_dumper/releases):
+
+```bash
+curl -LO https://github.com/Pterosaur/otel_dumper/releases/download/latest/otel_dumper-x86_64-linux
+chmod +x otel_dumper-x86_64-linux
+./otel_dumper-x86_64-linux --help
+```
+
+### Build from source
 
 ```bash
 # Requires Rust toolchain with musl target
