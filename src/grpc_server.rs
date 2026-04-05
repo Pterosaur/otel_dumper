@@ -32,13 +32,17 @@ pub async fn run(
     tx: mpsc::Sender<Vec<FlatDataPoint>>,
     port: u16,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-    let addr = format!("0.0.0.0:{port}").parse().unwrap();
+    let addr: std::net::SocketAddr = format!("0.0.0.0:{port}").parse().unwrap();
     let service = OtlpMetricsService { tx };
 
+    // Verify we can bind before claiming success
+    let incoming = tokio::net::TcpListener::bind(addr).await?;
     tracing::info!("gRPC OTLP server listening on {addr}");
 
     let mut server = tonic::transport::Server::builder();
     let router = server.add_service(MetricsServiceServer::new(service));
-    router.serve(addr).await?;
+    router
+        .serve_with_incoming(tokio_stream::wrappers::TcpListenerStream::new(incoming))
+        .await?;
     Ok(())
 }

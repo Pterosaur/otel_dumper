@@ -48,19 +48,31 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         config.max_rows,
     );
 
-    let grpc_handle = tokio::spawn(grpc_server::run(tx.clone(), config.grpc_port));
-    let http_handle = tokio::spawn(http_server::run(tx.clone(), config.http_port));
-
-    // Drop original sender so only the server tasks hold senders
-    drop(tx);
+    let grpc_handle = tokio::spawn({
+        let tx = tx.clone();
+        async move {
+            if let Err(e) = grpc_server::run(tx, config.grpc_port).await {
+                tracing::error!("gRPC server failed: {e}");
+            }
+        }
+    });
+    let http_handle = tokio::spawn({
+        let tx = tx.clone();
+        async move {
+            if let Err(e) = http_server::run(tx, config.http_port).await {
+                tracing::error!("HTTP server failed: {e}");
+            }
+        }
+    });
 
     // Wait for Ctrl+C
     tokio::signal::ctrl_c().await?;
     tracing::info!("Received Ctrl+C, shutting down...");
 
-    // Abort server tasks — this drops their channel senders
+    // Abort server tasks, then drop all senders so writer can finish
     grpc_handle.abort();
     http_handle.abort();
+    drop(tx);
 
     // Writer will see channel closed (all senders dropped) and flush remaining data
     if let Err(e) = writer_handle.await {

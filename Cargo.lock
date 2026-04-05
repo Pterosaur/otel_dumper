@@ -744,6 +744,7 @@ dependencies = [
  "serde_json",
  "tempfile",
  "tokio",
+ "tokio-stream",
  "tonic",
  "tonic-prost",
  "tower",
