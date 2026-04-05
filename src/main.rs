@@ -1,12 +1,6 @@
-mod config;
-mod converter;
-mod grpc_server;
-mod http_server;
-mod storage;
-mod writer;
-
 use clap::Parser;
-use config::Config;
+use otel_dumper::config::Config;
+use otel_dumper::{grpc_server, http_server, storage, writer};
 use std::sync::Arc;
 use std::time::Duration;
 
