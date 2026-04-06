@@ -43,118 +43,69 @@ impl MetricsStore {
 
     /// Update the store with a batch of data points.
     pub fn update(&self, points: &[FlatDataPoint]) {
-        let now = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap()
-            .as_secs_f64();
-        let cutoff = self.retention.map(|r| now - r.as_secs_f64());
+        let cutoff = self.retention.map(|r| {
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap()
+                .as_secs_f64()
+                - r.as_secs_f64()
+        });
         let keep_history = self.retention.is_some();
 
-        // Pre-parse labels and values outside the write lock
+        // Pre-parse labels and values outside the lock
         struct Prepared {
-            keys: Vec<(String, Vec<(String, String)>)>,
+            key: (String, Vec<(String, String)>),
             metric_type: &'static str,
-            values: Vec<f64>,
+            value: f64,
+            timestamp: f64,
         }
-        let mut batch: Vec<Prepared> = Vec::with_capacity(points.len());
+        let mut batch: Vec<Prepared> = Vec::with_capacity(points.len() * 2);
         for p in points {
             let labels = parse_labels(p.dp_attrs.as_deref());
+            let ts = p.timestamp_ns as f64 / 1_000_000_000.0;
+
             if p.metric_type == "histogram" {
-                let mut keys = Vec::new();
-                let mut values = Vec::new();
                 if let Some(s) = p.hist_sum {
-                    keys.push((format!("{}_sum", p.metric_name), labels.clone()));
-                    values.push(s);
+                    batch.push(Prepared {
+                        key: (format!("{}_sum", p.metric_name), labels.clone()),
+                        metric_type: p.metric_type,
+                        value: s,
+                        timestamp: ts,
+                    });
                 }
                 if let Some(c) = p.hist_count {
-                    keys.push((format!("{}_count", p.metric_name), labels));
-                    values.push(c as f64);
+                    batch.push(Prepared {
+                        key: (format!("{}_count", p.metric_name), labels),
+                        metric_type: p.metric_type,
+                        value: c as f64,
+                        timestamp: ts,
+                    });
                 }
-                batch.push(Prepared {
-                    keys,
-                    metric_type: p.metric_type,
-                    values,
-                });
             } else {
                 let value = p
                     .value_double
                     .unwrap_or_else(|| p.value_int.unwrap_or(0) as f64);
                 batch.push(Prepared {
-                    keys: vec![(p.metric_name.clone(), labels)],
+                    key: (p.metric_name.clone(), labels),
                     metric_type: p.metric_type,
-                    values: vec![value],
+                    value,
+                    timestamp: ts,
                 });
             }
         }
 
-        // Hold the write lock only for the fast HashMap insertions
+        // Hold the lock only for fast HashMap insertions
         let mut map = self.series.lock().unwrap();
         for prep in batch {
-            for (key, value) in prep.keys.into_iter().zip(prep.values) {
-                push_sample(
-                    &mut map,
-                    key,
-                    prep.metric_type,
-                    now,
-                    value,
-                    cutoff,
-                    keep_history,
-                );
-            }
-        }
-    }
-
-    /// Fast update from pre-parsed data (labels already parsed outside the lock).
-    #[allow(clippy::type_complexity)]
-    pub fn update_prepared(
-        &self,
-        prepared: &[(
-            String,
-            &'static str,
-            Vec<(String, String)>,
-            f64,
-            Option<f64>,
-            Option<i64>,
-        )],
-    ) {
-        let now = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap()
-            .as_secs_f64();
-        let cutoff = self.retention.map(|r| now - r.as_secs_f64());
-        let keep_history = self.retention.is_some();
-
-        let mut map = self.series.lock().unwrap();
-        for (metric_name, metric_type, labels, value, hist_sum, hist_count) in prepared {
-            if *metric_type == "histogram" {
-                if let Some(s) = hist_sum {
-                    let key = (format!("{metric_name}_sum"), labels.clone());
-                    push_sample(&mut map, key, metric_type, now, *s, cutoff, keep_history);
-                }
-                if let Some(c) = hist_count {
-                    let key = (format!("{metric_name}_count"), labels.clone());
-                    push_sample(
-                        &mut map,
-                        key,
-                        metric_type,
-                        now,
-                        *c as f64,
-                        cutoff,
-                        keep_history,
-                    );
-                }
-            } else {
-                let key = (metric_name.clone(), labels.clone());
-                push_sample(
-                    &mut map,
-                    key,
-                    metric_type,
-                    now,
-                    *value,
-                    cutoff,
-                    keep_history,
-                );
-            }
+            push_sample(
+                &mut map,
+                prep.key,
+                prep.metric_type,
+                prep.timestamp,
+                prep.value,
+                cutoff,
+                keep_history,
+            );
         }
     }
 
@@ -381,11 +332,6 @@ fn parse_promql(query: &str) -> (String, Vec<(String, String)>) {
     } else {
         (query.to_string(), vec![])
     }
-}
-
-/// Public wrapper for label parsing (used by writer to pre-parse outside the lock).
-pub fn parse_labels_public(dp_attrs: Option<&str>) -> Vec<(String, String)> {
-    parse_labels(dp_attrs)
 }
 
 fn parse_labels(dp_attrs: Option<&str>) -> Vec<(String, String)> {
@@ -817,21 +763,26 @@ mod tests {
         assert!(parse_duration_str("abc hours").is_none());
     }
 
+    fn make_gauge_at(name: &str, val: f64, attrs: Option<&str>, ts_ns: i64) -> FlatDataPoint {
+        FlatDataPoint {
+            timestamp_ns: ts_ns,
+            ..make_gauge(name, val, attrs)
+        }
+    }
+
     #[test]
     fn test_history_mode_keeps_samples() {
         let store = MetricsStore::new(Some(Duration::from_secs(3600)));
-        store.update(&[make_gauge("temp", 10.0, None)]);
-        std::thread::sleep(std::time::Duration::from_millis(10));
-        store.update(&[make_gauge("temp", 20.0, None)]);
-        std::thread::sleep(std::time::Duration::from_millis(10));
-        store.update(&[make_gauge("temp", 30.0, None)]);
-
-        // query_range should return multiple points
-        let now = SystemTime::now()
+        let now_ns = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .unwrap()
-            .as_secs_f64();
-        let result = store.query_range("temp", now - 60.0, now + 60.0, 0.001);
+            .as_nanos() as i64;
+        store.update(&[make_gauge_at("temp", 10.0, None, now_ns)]);
+        store.update(&[make_gauge_at("temp", 20.0, None, now_ns + 1_000_000_000)]);
+        store.update(&[make_gauge_at("temp", 30.0, None, now_ns + 2_000_000_000)]);
+
+        let now = now_ns as f64 / 1e9;
+        let result = store.query_range("temp", now - 1.0, now + 10.0, 0.001);
         let values = result["data"]["result"][0]["values"].as_array().unwrap();
         assert!(
             values.len() >= 3,
@@ -843,9 +794,13 @@ mod tests {
     #[test]
     fn test_latest_only_mode_single_point() {
         let store = MetricsStore::new(None);
-        store.update(&[make_gauge("temp", 10.0, None)]);
-        store.update(&[make_gauge("temp", 20.0, None)]);
-        store.update(&[make_gauge("temp", 30.0, None)]);
+        let now_ns = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos() as i64;
+        store.update(&[make_gauge_at("temp", 10.0, None, now_ns)]);
+        store.update(&[make_gauge_at("temp", 20.0, None, now_ns + 1_000_000_000)]);
+        store.update(&[make_gauge_at("temp", 30.0, None, now_ns + 2_000_000_000)]);
 
         // render should show only latest
         let output = store.render();
@@ -854,11 +809,8 @@ mod tests {
         assert!(!output.contains("temp 20"));
 
         // query_range should return only 1 point
-        let now = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap()
-            .as_secs_f64();
-        let result = store.query_range("temp", now - 60.0, now + 60.0, 1.0);
+        let now = now_ns as f64 / 1e9;
+        let result = store.query_range("temp", now - 1.0, now + 10.0, 1.0);
         let values = result["data"]["result"][0]["values"].as_array().unwrap();
         assert_eq!(values.len(), 1);
     }
