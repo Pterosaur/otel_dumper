@@ -1,77 +1,117 @@
 use crate::converter::FlatDataPoint;
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use std::sync::{Arc, RwLock};
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 /// Key for a unique metric time series: (metric_name, sorted_label_pairs)
 type SeriesKey = (String, Vec<(String, String)>);
 
-struct SeriesValue {
-    metric_type: &'static str,
-    value_double: Option<f64>,
-    value_int: Option<i64>,
-    hist_count: Option<i64>,
-    hist_sum: Option<f64>,
-    timestamp: f64, // Unix seconds
+#[derive(Clone)]
+struct Sample {
+    timestamp: f64,
+    value: f64,
 }
 
-/// Thread-safe store of latest metric values, rendered as Prometheus text on demand.
+struct SeriesData {
+    metric_type: &'static str,
+    /// For histogram, we store _sum and _count as separate "virtual" series,
+    /// so this is used for gauge/sum only.
+    samples: VecDeque<Sample>,
+}
+
+/// Thread-safe store of metric values with optional history retention.
 pub struct MetricsStore {
-    series: RwLock<HashMap<SeriesKey, SeriesValue>>,
+    series: RwLock<HashMap<SeriesKey, SeriesData>>,
+    retention: Option<Duration>,
 }
 
 impl Default for MetricsStore {
     fn default() -> Self {
-        Self::new()
+        Self::new(None)
     }
 }
 
 impl MetricsStore {
-    pub fn new() -> Self {
+    /// Create a new store. If `retention` is Some, keep historical samples within that window.
+    /// If None, only keep the latest value per series.
+    pub fn new(retention: Option<Duration>) -> Self {
         MetricsStore {
             series: RwLock::new(HashMap::new()),
+            retention,
         }
     }
 
-    /// Update the store with a batch of data points (keeps latest value per series).
+    /// Update the store with a batch of data points.
     pub fn update(&self, points: &[FlatDataPoint]) {
         let now = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .unwrap()
             .as_secs_f64();
+        let cutoff = self.retention.map(|r| now - r.as_secs_f64());
+
         let mut map = self.series.write().unwrap();
         for p in points {
             let labels = parse_labels(p.dp_attrs.as_deref());
-            let key = (p.metric_name.clone(), labels);
-            map.insert(
-                key,
-                SeriesValue {
-                    metric_type: p.metric_type,
-                    value_double: p.value_double,
-                    value_int: p.value_int,
-                    hist_count: p.hist_count,
-                    hist_sum: p.hist_sum,
-                    timestamp: now,
-                },
-            );
+
+            if p.metric_type == "histogram" {
+                // Store _sum and _count as separate series
+                if let Some(s) = p.hist_sum {
+                    let key = (format!("{}_sum", p.metric_name), labels.clone());
+                    push_sample(
+                        &mut map,
+                        key,
+                        p.metric_type,
+                        now,
+                        s,
+                        cutoff,
+                        self.retention.is_some(),
+                    );
+                }
+                if let Some(c) = p.hist_count {
+                    let key = (format!("{}_count", p.metric_name), labels);
+                    push_sample(
+                        &mut map,
+                        key,
+                        p.metric_type,
+                        now,
+                        c as f64,
+                        cutoff,
+                        self.retention.is_some(),
+                    );
+                }
+            } else {
+                let value = p
+                    .value_double
+                    .unwrap_or_else(|| p.value_int.unwrap_or(0) as f64);
+                let key = (p.metric_name.clone(), labels);
+                push_sample(
+                    &mut map,
+                    key,
+                    p.metric_type,
+                    now,
+                    value,
+                    cutoff,
+                    self.retention.is_some(),
+                );
+            }
         }
     }
 
-    /// Render all metrics in Prometheus text exposition format.
+    /// Render all metrics in Prometheus text exposition format (latest value only).
     pub fn render(&self) -> String {
         let map = self.series.read().unwrap();
         if map.is_empty() {
             return String::new();
         }
 
-        // Group by metric name for TYPE/HELP lines
-        type SeriesList<'a> = Vec<(&'a [(String, String)], &'a SeriesValue)>;
-        let mut by_name: HashMap<&str, SeriesList<'_>> = HashMap::new();
-        for ((name, labels), val) in map.iter() {
+        // Group by base metric name
+        type NameGroup<'a> = Vec<(&'a [(String, String)], &'a SeriesData)>;
+        let mut by_name: HashMap<&str, NameGroup<'_>> = HashMap::new();
+        for ((name, labels), data) in map.iter() {
             by_name
                 .entry(name.as_str())
                 .or_default()
-                .push((labels, val));
+                .push((labels, data));
         }
 
         let mut out = String::with_capacity(4096);
@@ -82,35 +122,14 @@ impl MetricsStore {
             let series_list = &by_name[name];
             let prom_name = sanitize_metric_name(name);
             let prom_type = match series_list[0].1.metric_type {
-                "gauge" => "gauge",
                 "sum" => "counter",
-                "histogram" => "gauge", // we expose hist_sum/hist_count as gauges
                 _ => "gauge",
             };
-
-            if series_list[0].1.metric_type == "histogram" {
-                // Expose as two metrics: _sum and _count
-                out.push_str(&format!("# TYPE {prom_name}_sum {prom_type}\n"));
-                out.push_str(&format!("# TYPE {prom_name}_count {prom_type}\n"));
-                for (labels, val) in series_list {
+            out.push_str(&format!("# TYPE {prom_name} {prom_type}\n"));
+            for (labels, data) in series_list {
+                if let Some(sample) = data.samples.back() {
                     let label_str = format_labels(labels);
-                    if let Some(s) = val.hist_sum {
-                        out.push_str(&format!("{prom_name}_sum{label_str} {s}\n"));
-                    }
-                    if let Some(c) = val.hist_count {
-                        out.push_str(&format!("{prom_name}_count{label_str} {c}\n"));
-                    }
-                }
-            } else {
-                out.push_str(&format!("# TYPE {prom_name} {prom_type}\n"));
-                for (labels, val) in series_list {
-                    let label_str = format_labels(labels);
-                    let value = val
-                        .value_double
-                        .map(|v| format!("{v}"))
-                        .or_else(|| val.value_int.map(|v| format!("{v}")))
-                        .unwrap_or_else(|| "0".to_string());
-                    out.push_str(&format!("{prom_name}{label_str} {value}\n"));
+                    out.push_str(&format!("{prom_name}{label_str} {}\n", sample.value));
                 }
             }
         }
@@ -120,64 +139,96 @@ impl MetricsStore {
     /// Build instant query result for Prometheus API.
     pub fn query_instant(&self, query: &str) -> serde_json::Value {
         let map = self.series.read().unwrap();
-        let mut results = Vec::new();
-
-        // Parse simple PromQL: metric_name or metric_name{label="value",...}
         let (metric_name, label_filters) = parse_promql(query);
         let prom_name = sanitize_metric_name(&metric_name);
 
-        for ((name, labels), val) in map.iter() {
+        let mut results = Vec::new();
+        for ((name, labels), data) in map.iter() {
             let sname = sanitize_metric_name(name);
-
-            // Match metric name
             if !prom_name.is_empty() && sname != prom_name {
                 continue;
             }
-
-            // Match label filters
-            if !label_filters
-                .iter()
-                .all(|(fk, fv)| labels.iter().any(|(lk, lv)| lk == fk && lv == fv))
-            {
+            if !matches_filters(labels, &label_filters) {
                 continue;
             }
-
-            if val.metric_type == "histogram" {
-                // Expose _sum and _count as separate results
-                if let Some(s) = val.hist_sum {
-                    let m = build_metric_map(&format!("{sname}_sum"), labels);
-                    results.push(serde_json::json!({
-                        "metric": m,
-                        "value": [val.timestamp, s.to_string()]
-                    }));
-                }
-                if let Some(c) = val.hist_count {
-                    let m = build_metric_map(&format!("{sname}_count"), labels);
-                    results.push(serde_json::json!({
-                        "metric": m,
-                        "value": [val.timestamp, c.to_string()]
-                    }));
-                }
-            } else {
-                let value_str = val
-                    .value_double
-                    .map(|v| v.to_string())
-                    .or_else(|| val.value_int.map(|v| v.to_string()))
-                    .unwrap_or_else(|| "0".to_string());
+            if let Some(sample) = data.samples.back() {
                 let m = build_metric_map(&sname, labels);
                 results.push(serde_json::json!({
                     "metric": m,
-                    "value": [val.timestamp, value_str]
+                    "value": [sample.timestamp, sample.value.to_string()]
                 }));
             }
         }
 
         serde_json::json!({
             "status": "success",
-            "data": {
-                "resultType": "vector",
-                "result": results
+            "data": { "resultType": "vector", "result": results }
+        })
+    }
+
+    /// Build range query result for Prometheus API (returns full history if retention is enabled).
+    pub fn query_range(&self, query: &str, start: f64, end: f64, step: f64) -> serde_json::Value {
+        let map = self.series.read().unwrap();
+        let (metric_name, label_filters) = parse_promql(query);
+        let prom_name = sanitize_metric_name(&metric_name);
+
+        let mut results = Vec::new();
+        for ((name, labels), data) in map.iter() {
+            let sname = sanitize_metric_name(name);
+            if !prom_name.is_empty() && sname != prom_name {
+                continue;
             }
+            if !matches_filters(labels, &label_filters) {
+                continue;
+            }
+
+            // Collect samples in the [start, end] window
+            let values: Vec<serde_json::Value> = if self.retention.is_some() {
+                // Downsample to step interval
+                let mut stepped = Vec::new();
+                let mut t = start;
+                while t <= end {
+                    // Find closest sample <= t
+                    if let Some(sample) = data
+                        .samples
+                        .iter()
+                        .rev()
+                        .find(|s| s.timestamp <= t + step / 2.0)
+                    {
+                        stepped.push(serde_json::json!([t, sample.value.to_string()]));
+                    }
+                    t += step;
+                }
+                if stepped.is_empty() {
+                    // Fallback: return all samples in range
+                    data.samples
+                        .iter()
+                        .filter(|s| s.timestamp >= start && s.timestamp <= end)
+                        .map(|s| serde_json::json!([s.timestamp, s.value.to_string()]))
+                        .collect()
+                } else {
+                    stepped
+                }
+            } else {
+                // No history — return latest as single point
+                data.samples
+                    .back()
+                    .map(|s| vec![serde_json::json!([s.timestamp, s.value.to_string()])])
+                    .unwrap_or_default()
+            };
+
+            if !values.is_empty() {
+                let m = build_metric_map(&sname, labels);
+                results.push(serde_json::json!({
+                    "metric": m,
+                    "values": values
+                }));
+            }
+        }
+
+        serde_json::json!({
+            "status": "success",
+            "data": { "resultType": "matrix", "result": results }
         })
     }
 
@@ -192,6 +243,45 @@ impl MetricsStore {
         names.dedup();
         names
     }
+}
+
+fn push_sample(
+    map: &mut HashMap<SeriesKey, SeriesData>,
+    key: SeriesKey,
+    metric_type: &'static str,
+    timestamp: f64,
+    value: f64,
+    cutoff: Option<f64>,
+    keep_history: bool,
+) {
+    let entry = map.entry(key).or_insert_with(|| SeriesData {
+        metric_type,
+        samples: VecDeque::new(),
+    });
+    if keep_history {
+        entry.samples.push_back(Sample { timestamp, value });
+        // Evict old samples
+        if let Some(cutoff) = cutoff {
+            while entry.samples.front().is_some_and(|s| s.timestamp < cutoff) {
+                entry.samples.pop_front();
+            }
+        }
+    } else {
+        // Latest-only mode
+        if entry.samples.is_empty() {
+            entry.samples.push_back(Sample { timestamp, value });
+        } else {
+            let s = entry.samples.back_mut().unwrap();
+            s.timestamp = timestamp;
+            s.value = value;
+        }
+    }
+}
+
+fn matches_filters(labels: &[(String, String)], filters: &[(String, String)]) -> bool {
+    filters
+        .iter()
+        .all(|(fk, fv)| labels.iter().any(|(lk, lv)| lk == fk && lv == fv))
 }
 
 fn build_metric_map(
@@ -295,6 +385,29 @@ fn escape_label_value(val: &str) -> String {
         .replace('\n', "\\n")
 }
 
+/// Parse a human-readable duration string like "30 mins", "24 hours", "5 days", "1h", "30m".
+pub fn parse_duration_str(s: &str) -> Option<Duration> {
+    let s = s.trim().to_lowercase();
+    // Try to split into number and unit
+    let (num_str, unit) = if let Some(pos) = s.find(|c: char| c.is_alphabetic()) {
+        (s[..pos].trim(), s[pos..].trim())
+    } else {
+        // Bare number = seconds
+        return s.parse::<f64>().ok().map(Duration::from_secs_f64);
+    };
+
+    let num: f64 = num_str.parse().ok()?;
+    let secs = match unit {
+        "s" | "sec" | "secs" | "second" | "seconds" => num,
+        "m" | "min" | "mins" | "minute" | "minutes" => num * 60.0,
+        "h" | "hr" | "hrs" | "hour" | "hours" => num * 3600.0,
+        "d" | "day" | "days" => num * 86400.0,
+        "w" | "week" | "weeks" => num * 604800.0,
+        _ => return None,
+    };
+    Some(Duration::from_secs_f64(secs))
+}
+
 /// Start the Prometheus-compatible HTTP server.
 pub async fn run(store: Arc<MetricsStore>, port: u16) -> Result<(), std::io::Error> {
     use axum::{routing::get, Router};
@@ -349,11 +462,8 @@ async fn handle_query(
 #[derive(serde::Deserialize)]
 struct QueryRangeParams {
     query: Option<String>,
-    #[allow(dead_code)]
     start: Option<String>,
-    #[allow(dead_code)]
     end: Option<String>,
-    #[allow(dead_code)]
     step: Option<String>,
 }
 
@@ -361,35 +471,28 @@ async fn handle_query_range(
     axum::extract::State(store): axum::extract::State<Arc<MetricsStore>>,
     axum::extract::Query(params): axum::extract::Query<QueryRangeParams>,
 ) -> axum::Json<serde_json::Value> {
-    // We only have latest values, so return them as a single-point matrix
     let query = params.query.unwrap_or_default();
-    let instant = store.query_instant(&query);
-
-    // Convert vector result to matrix format
-    let results = instant["data"]["result"]
-        .as_array()
-        .cloned()
-        .unwrap_or_default();
-    let matrix_results: Vec<serde_json::Value> = results
-        .into_iter()
-        .map(|mut r| {
-            if let Some(val) = r.get("value").cloned() {
-                r.as_object_mut()
-                    .unwrap()
-                    .insert("values".to_string(), serde_json::json!([val]));
-                r.as_object_mut().unwrap().remove("value");
-            }
-            r
-        })
-        .collect();
-
-    axum::Json(serde_json::json!({
-        "status": "success",
-        "data": {
-            "resultType": "matrix",
-            "result": matrix_results
-        }
-    }))
+    let start = params
+        .start
+        .as_deref()
+        .and_then(|s| s.parse::<f64>().ok())
+        .unwrap_or(0.0);
+    let end = params
+        .end
+        .as_deref()
+        .and_then(|s| s.parse::<f64>().ok())
+        .unwrap_or_else(|| {
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap()
+                .as_secs_f64()
+        });
+    let step = params
+        .step
+        .as_deref()
+        .and_then(|s| s.parse::<f64>().ok())
+        .unwrap_or(15.0);
+    axum::Json(store.query_range(&query, start, end, step))
 }
 
 async fn handle_label_values_name(
@@ -517,13 +620,13 @@ mod tests {
 
     #[test]
     fn test_empty_store() {
-        let store = MetricsStore::new();
+        let store = MetricsStore::new(None);
         assert_eq!(store.render(), "");
     }
 
     #[test]
     fn test_gauge_no_labels() {
-        let store = MetricsStore::new();
+        let store = MetricsStore::new(None);
         store.update(&[make_gauge("cpu.usage", 72.5, None)]);
         let output = store.render();
         assert!(output.contains("# TYPE cpu_usage gauge"));
@@ -532,7 +635,7 @@ mod tests {
 
     #[test]
     fn test_gauge_with_labels() {
-        let store = MetricsStore::new();
+        let store = MetricsStore::new(None);
         store.update(&[make_gauge(
             "cpu.usage",
             45.0,
@@ -545,7 +648,7 @@ mod tests {
 
     #[test]
     fn test_counter() {
-        let store = MetricsStore::new();
+        let store = MetricsStore::new(None);
         store.update(&[make_counter(
             "http.requests",
             42,
@@ -558,7 +661,7 @@ mod tests {
 
     #[test]
     fn test_histogram_sum_count() {
-        let store = MetricsStore::new();
+        let store = MetricsStore::new(None);
         store.update(&[make_histogram(
             "req.duration",
             100,
@@ -574,7 +677,7 @@ mod tests {
 
     #[test]
     fn test_update_overwrites_latest() {
-        let store = MetricsStore::new();
+        let store = MetricsStore::new(None);
         store.update(&[make_gauge("temp", 10.0, None)]);
         store.update(&[make_gauge("temp", 20.0, None)]);
         let output = store.render();
@@ -584,7 +687,7 @@ mod tests {
 
     #[test]
     fn test_multiple_series() {
-        let store = MetricsStore::new();
+        let store = MetricsStore::new(None);
         store.update(&[
             make_gauge("cpu", 50.0, Some(r#"{"host":"a"}"#)),
             make_gauge("cpu", 70.0, Some(r#"{"host":"b"}"#)),
@@ -617,5 +720,110 @@ mod tests {
         assert_eq!(labels[0].0, "a");
         assert_eq!(labels[1].0, "m");
         assert_eq!(labels[2].0, "z");
+    }
+
+    #[test]
+    fn test_parse_duration_str() {
+        assert_eq!(
+            parse_duration_str("30 mins"),
+            Some(Duration::from_secs(1800))
+        );
+        assert_eq!(
+            parse_duration_str("24 hours"),
+            Some(Duration::from_secs(86400))
+        );
+        assert_eq!(
+            parse_duration_str("5 days"),
+            Some(Duration::from_secs(432000))
+        );
+        assert_eq!(parse_duration_str("1h"), Some(Duration::from_secs(3600)));
+        assert_eq!(parse_duration_str("30m"), Some(Duration::from_secs(1800)));
+        assert_eq!(parse_duration_str("90s"), Some(Duration::from_secs(90)));
+        assert_eq!(
+            parse_duration_str("1 week"),
+            Some(Duration::from_secs(604800))
+        );
+        assert_eq!(
+            parse_duration_str("2weeks"),
+            Some(Duration::from_secs(1209600))
+        );
+        assert!(parse_duration_str("invalid").is_none());
+        assert!(parse_duration_str("abc hours").is_none());
+    }
+
+    #[test]
+    fn test_history_mode_keeps_samples() {
+        let store = MetricsStore::new(Some(Duration::from_secs(3600)));
+        store.update(&[make_gauge("temp", 10.0, None)]);
+        std::thread::sleep(std::time::Duration::from_millis(10));
+        store.update(&[make_gauge("temp", 20.0, None)]);
+        std::thread::sleep(std::time::Duration::from_millis(10));
+        store.update(&[make_gauge("temp", 30.0, None)]);
+
+        // query_range should return multiple points
+        let now = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_secs_f64();
+        let result = store.query_range("temp", now - 60.0, now + 60.0, 0.001);
+        let values = result["data"]["result"][0]["values"].as_array().unwrap();
+        assert!(
+            values.len() >= 3,
+            "Expected at least 3 samples, got {}",
+            values.len()
+        );
+    }
+
+    #[test]
+    fn test_latest_only_mode_single_point() {
+        let store = MetricsStore::new(None);
+        store.update(&[make_gauge("temp", 10.0, None)]);
+        store.update(&[make_gauge("temp", 20.0, None)]);
+        store.update(&[make_gauge("temp", 30.0, None)]);
+
+        // render should show only latest
+        let output = store.render();
+        assert!(output.contains("temp 30"));
+        assert!(!output.contains("temp 10"));
+        assert!(!output.contains("temp 20"));
+
+        // query_range should return only 1 point
+        let now = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_secs_f64();
+        let result = store.query_range("temp", now - 60.0, now + 60.0, 1.0);
+        let values = result["data"]["result"][0]["values"].as_array().unwrap();
+        assert_eq!(values.len(), 1);
+    }
+
+    #[test]
+    fn test_histogram_in_store() {
+        let store = MetricsStore::new(None);
+        store.update(&[make_histogram(
+            "req.duration",
+            100,
+            5000.0,
+            Some(r#"{"ep":"/api"}"#),
+        )]);
+        let output = store.render();
+        // Histograms stored as _sum and _count
+        assert!(output.contains("req_duration_sum"));
+        assert!(output.contains("req_duration_count"));
+        assert!(output.contains("5000"));
+        assert!(output.contains("100"));
+    }
+
+    #[test]
+    fn test_query_instant_with_filter() {
+        let store = MetricsStore::new(None);
+        store.update(&[
+            make_gauge("cpu", 50.0, Some(r#"{"host":"a"}"#)),
+            make_gauge("cpu", 70.0, Some(r#"{"host":"b"}"#)),
+        ]);
+        let result = store.query_instant(r#"cpu{host="a"}"#);
+        let results = result["data"]["result"].as_array().unwrap();
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0]["value"][1], "50");
     }
 }

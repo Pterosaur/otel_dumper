@@ -37,9 +37,19 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         Arc::new(jsonl_writer::JsonlWriter::new(path).expect("Failed to open JSONL output file"))
     });
 
-    let prom_store = config
-        .prom_port
-        .map(|_| Arc::new(prom_exporter::MetricsStore::new()));
+    let prom_store = config.prom_port.map(|_| {
+        let retention = config.prom_history.as_ref().and_then(|s| {
+            let d = prom_exporter::parse_duration_str(s);
+            if d.is_none() {
+                tracing::error!("Invalid --prom-history value: {s:?}");
+            }
+            d
+        });
+        if let Some(r) = retention {
+            tracing::info!("Prometheus history retention: {}s", r.as_secs());
+        }
+        Arc::new(prom_exporter::MetricsStore::new(retention))
+    });
 
     let (tx, rx) = tokio::sync::mpsc::channel(config.channel_capacity);
 

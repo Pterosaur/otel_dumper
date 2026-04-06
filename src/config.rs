@@ -27,6 +27,12 @@ pub struct Config {
     #[arg(long)]
     pub prom_port: Option<u16>,
 
+    /// Prometheus history retention window (e.g. "30 mins", "24 hours", "5 days").
+    /// When set, the exporter keeps historical data points in memory for time-range queries.
+    /// Without this, only the latest value per series is kept.
+    #[arg(long)]
+    pub prom_history: Option<String>,
+
     /// Batch size: flush to SQLite when this many data points accumulate
     #[arg(long, default_value_t = 50_000)]
     pub batch_size: usize,
