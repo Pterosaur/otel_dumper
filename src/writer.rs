@@ -117,38 +117,14 @@ async fn flush(
 ) -> u64 {
     let batch = std::mem::replace(buffer, Vec::with_capacity(buffer.capacity()));
     let count = batch.len() as u64;
-    let storage = storage.clone();
-    let jsonl = jsonl.clone();
 
-    // Update prom store in a separate blocking task (fire-and-forget, non-blocking)
-    if let Some(ps) = prom_store.clone() {
-        // Pre-parse labels on the async side, then just do fast inserts under lock
-        let prepared: Vec<_> = batch
-            .iter()
-            .map(|p| {
-                let labels = crate::prom_exporter::parse_labels_public(p.dp_attrs.as_deref());
-                let metric_name = p.metric_name.clone();
-                let metric_type = p.metric_type;
-                let value = p
-                    .value_double
-                    .unwrap_or_else(|| p.value_int.unwrap_or(0) as f64);
-                let hist_sum = p.hist_sum;
-                let hist_count = p.hist_count;
-                (
-                    metric_name,
-                    metric_type,
-                    labels,
-                    value,
-                    hist_sum,
-                    hist_count,
-                )
-            })
-            .collect();
-        tokio::task::spawn_blocking(move || {
-            ps.update_prepared(&prepared);
-        });
+    // Update prom store synchronously (fast: just HashMap inserts under Mutex)
+    if let Some(ps) = prom_store {
+        ps.update(&batch);
     }
 
+    let storage = storage.clone();
+    let jsonl = jsonl.clone();
     let result = tokio::task::spawn_blocking(move || {
         storage.insert_batch(&batch)?;
         if let Some(jw) = &jsonl {

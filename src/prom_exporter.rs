@@ -228,58 +228,58 @@ impl MetricsStore {
     }
 
     /// Build range query result for Prometheus API (returns full history if retention is enabled).
-    pub fn query_range(&self, query: &str, start: f64, end: f64, step: f64) -> serde_json::Value {
-        let map = self.series.lock().unwrap();
+    pub fn query_range(&self, query: &str, start: f64, end: f64, _step: f64) -> serde_json::Value {
         let (metric_name, label_filters) = parse_promql(query);
         let prom_name = sanitize_metric_name(&metric_name);
 
-        let mut results = Vec::new();
-        for ((name, labels), data) in map.iter() {
-            let sname = sanitize_metric_name(name);
-            if !prom_name.is_empty() && sname != prom_name {
-                continue;
-            }
-            if !matches_filters(labels, &label_filters) {
-                continue;
-            }
+        // Copy matching series data out of the lock quickly
+        struct MatchedSeries {
+            name: String,
+            labels: Vec<(String, String)>,
+            samples: Vec<Sample>,
+            has_history: bool,
+        }
 
-            // Collect samples in the [start, end] window
-            let values: Vec<serde_json::Value> = if self.retention.is_some() {
-                // Downsample to step interval
-                let mut stepped = Vec::new();
-                let mut t = start;
-                while t <= end {
-                    // Find closest sample <= t
-                    if let Some(sample) = data
-                        .samples
-                        .iter()
-                        .rev()
-                        .find(|s| s.timestamp <= t + step / 2.0)
-                    {
-                        stepped.push(serde_json::json!([t, sample.value.to_string()]));
-                    }
-                    t += step;
-                }
-                if stepped.is_empty() {
-                    // Fallback: return all samples in range
-                    data.samples
-                        .iter()
-                        .filter(|s| s.timestamp >= start && s.timestamp <= end)
-                        .map(|s| serde_json::json!([s.timestamp, s.value.to_string()]))
-                        .collect()
-                } else {
-                    stepped
-                }
+        let matched: Vec<MatchedSeries> = {
+            let map = self.series.lock().unwrap();
+            map.iter()
+                .filter(|((name, labels), _)| {
+                    let sname = sanitize_metric_name(name);
+                    (prom_name.is_empty() || sname == prom_name)
+                        && matches_filters(labels, &label_filters)
+                })
+                .map(|((name, labels), data)| MatchedSeries {
+                    name: sanitize_metric_name(name),
+                    labels: labels.clone(),
+                    samples: data.samples.iter().cloned().collect(),
+                    has_history: self.retention.is_some(),
+                })
+                .collect()
+        };
+        // Lock released here
+
+        let mut results = Vec::new();
+        for series in &matched {
+            let values: Vec<serde_json::Value> = if series.has_history && !series.samples.is_empty()
+            {
+                // Return samples in [start, end] range (already time-ordered)
+                series
+                    .samples
+                    .iter()
+                    .filter(|s| s.timestamp >= start && s.timestamp <= end)
+                    .map(|s| serde_json::json!([s.timestamp, s.value.to_string()]))
+                    .collect()
             } else {
                 // No history — return latest as single point
-                data.samples
-                    .back()
+                series
+                    .samples
+                    .last()
                     .map(|s| vec![serde_json::json!([s.timestamp, s.value.to_string()])])
                     .unwrap_or_default()
             };
 
             if !values.is_empty() {
-                let m = build_metric_map(&sname, labels);
+                let m = build_metric_map(&series.name, &series.labels);
                 results.push(serde_json::json!({
                     "metric": m,
                     "values": values
