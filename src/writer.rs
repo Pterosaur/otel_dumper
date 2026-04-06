@@ -119,7 +119,11 @@ async fn flush(
     let count = batch.len() as u64;
     let storage = storage.clone();
     let jsonl = jsonl.clone();
-    let prom_store = prom_store.clone();
+
+    // Update prom store BEFORE the blocking task (fast in-memory operation)
+    if let Some(ps) = prom_store {
+        ps.update(&batch);
+    }
 
     let result = tokio::task::spawn_blocking(move || {
         storage.insert_batch(&batch)?;
@@ -127,9 +131,6 @@ async fn flush(
             if let Err(e) = jw.write_batch(&batch) {
                 tracing::error!("JSONL write error: {e}");
             }
-        }
-        if let Some(ps) = &prom_store {
-            ps.update(&batch);
         }
         Ok::<_, rusqlite::Error>(())
     })
