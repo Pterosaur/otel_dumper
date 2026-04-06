@@ -1,5 +1,6 @@
 use crate::converter::FlatDataPoint;
 use crate::jsonl_writer::JsonlWriter;
+use crate::prom_exporter::MetricsStore;
 use crate::storage::Storage;
 use std::sync::Arc;
 use std::time::Duration;
@@ -10,6 +11,7 @@ pub fn start_writer(
     rx: mpsc::Receiver<Vec<FlatDataPoint>>,
     storage: Arc<Storage>,
     jsonl: Option<Arc<JsonlWriter>>,
+    prom_store: Option<Arc<MetricsStore>>,
     batch_size: usize,
     flush_interval: Duration,
     max_rows: u64,
@@ -18,6 +20,7 @@ pub fn start_writer(
         rx,
         storage,
         jsonl,
+        prom_store,
         batch_size,
         flush_interval,
         max_rows,
@@ -28,6 +31,7 @@ async fn run_writer(
     mut rx: mpsc::Receiver<Vec<FlatDataPoint>>,
     storage: Arc<Storage>,
     jsonl: Option<Arc<JsonlWriter>>,
+    prom_store: Option<Arc<MetricsStore>>,
     batch_size: usize,
     flush_interval: Duration,
     max_rows: u64,
@@ -58,7 +62,7 @@ async fn run_writer(
                         total_requests += 1;
                         buffer.extend(points);
                         if buffer.len() >= batch_size {
-                            total_rows += flush(&storage, &jsonl, &mut buffer).await;
+                            total_rows += flush(&storage, &jsonl, &prom_store, &mut buffer).await;
                             if max_rows > 0 && total_rows >= max_rows {
                                 tracing::info!("Reached max_rows limit ({max_rows}), stopping writer");
                                 break;
@@ -68,7 +72,7 @@ async fn run_writer(
                     None => {
                         // Channel closed — flush remaining and exit
                         if !buffer.is_empty() {
-                            total_rows += flush(&storage, &jsonl, &mut buffer).await;
+                            total_rows += flush(&storage, &jsonl, &prom_store, &mut buffer).await;
                         }
                         break;
                     }
@@ -76,7 +80,7 @@ async fn run_writer(
             }
             _ = interval.tick() => {
                 if !buffer.is_empty() {
-                    total_rows += flush(&storage, &jsonl, &mut buffer).await;
+                    total_rows += flush(&storage, &jsonl, &prom_store, &mut buffer).await;
                     if max_rows > 0 && total_rows >= max_rows {
                         tracing::info!("Reached max_rows limit ({max_rows}), stopping writer");
                         break;
@@ -106,12 +110,14 @@ async fn run_writer(
 async fn flush(
     storage: &Arc<Storage>,
     jsonl: &Option<Arc<JsonlWriter>>,
+    prom_store: &Option<Arc<MetricsStore>>,
     buffer: &mut Vec<FlatDataPoint>,
 ) -> u64 {
     let batch = std::mem::replace(buffer, Vec::with_capacity(buffer.capacity()));
     let count = batch.len() as u64;
     let storage = storage.clone();
     let jsonl = jsonl.clone();
+    let prom_store = prom_store.clone();
 
     let result = tokio::task::spawn_blocking(move || {
         storage.insert_batch(&batch)?;
@@ -119,6 +125,9 @@ async fn flush(
             if let Err(e) = jw.write_batch(&batch) {
                 tracing::error!("JSONL write error: {e}");
             }
+        }
+        if let Some(ps) = &prom_store {
+            ps.update(&batch);
         }
         Ok::<_, rusqlite::Error>(())
     })
@@ -182,6 +191,7 @@ mod tests {
             rx,
             storage.clone(),
             None,
+            None,
             10_000,
             Duration::from_secs(60),
             0,
@@ -202,7 +212,15 @@ mod tests {
         let (tx, rx) = mpsc::channel(100);
 
         // batch_size=50, so sending 60 points should trigger a flush
-        let handle = start_writer(rx, storage.clone(), None, 50, Duration::from_secs(60), 0);
+        let handle = start_writer(
+            rx,
+            storage.clone(),
+            None,
+            None,
+            50,
+            Duration::from_secs(60),
+            0,
+        );
 
         tx.send(make_points(60)).await.unwrap();
         // Give writer a moment to process
@@ -221,7 +239,15 @@ mod tests {
         let storage = Arc::new(Storage::new(&dir.path().join("test.db")).unwrap());
         let (tx, rx) = mpsc::channel(100);
 
-        let handle = start_writer(rx, storage.clone(), None, 10, Duration::from_secs(60), 25);
+        let handle = start_writer(
+            rx,
+            storage.clone(),
+            None,
+            None,
+            10,
+            Duration::from_secs(60),
+            25,
+        );
 
         tx.send(make_points(15)).await.unwrap();
         tx.send(make_points(15)).await.unwrap();
@@ -242,6 +268,7 @@ mod tests {
         let handle = start_writer(
             rx,
             storage.clone(),
+            None,
             None,
             100_000,
             Duration::from_millis(50),

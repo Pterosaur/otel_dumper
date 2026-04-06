@@ -1,6 +1,6 @@
 use clap::Parser;
 use otel_dumper::config::Config;
-use otel_dumper::{grpc_server, http_server, jsonl_writer, storage, writer};
+use otel_dumper::{grpc_server, http_server, jsonl_writer, prom_exporter, storage, writer};
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -37,12 +37,17 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         Arc::new(jsonl_writer::JsonlWriter::new(path).expect("Failed to open JSONL output file"))
     });
 
+    let prom_store = config
+        .prom_port
+        .map(|_| Arc::new(prom_exporter::MetricsStore::new()));
+
     let (tx, rx) = tokio::sync::mpsc::channel(config.channel_capacity);
 
     let writer_handle = writer::start_writer(
         rx,
         storage.clone(),
         jsonl,
+        prom_store.clone(),
         config.batch_size,
         Duration::from_millis(config.flush_interval_ms),
         config.max_rows,
@@ -66,6 +71,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             }
         }
     });
+    let prom_handle = config.prom_port.map(|port| {
+        let store = prom_store.clone().unwrap();
+        tokio::spawn(async move {
+            if let Err(e) = prom_exporter::run(store, port).await {
+                tracing::error!("Prometheus exporter failed: {e}");
+            }
+        })
+    });
 
     // Wait for Ctrl+C, or both servers dying (e.g. port conflict)
     tokio::select! {
@@ -76,6 +89,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             http_handle.abort();
             let _ = grpc_handle.await;
             let _ = http_handle.await;
+            if let Some(h) = prom_handle { h.abort(); }
         }
         _ = async {
             let (_, _) = tokio::join!(&mut grpc_handle, &mut http_handle);

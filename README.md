@@ -11,7 +11,8 @@ An OpenTelemetry Collector simulator that receives OTLP Metrics data and dumps i
 - **Dual protocol support**: gRPC (`:4317`) and HTTP (`:4318`) OTLP endpoints
 - **High throughput**: Designed for ~100K data points/sec with batched SQLite writes
 - **Dual output format**: SQLite for Grafana queries + optional JSONL for human-readable local inspection
-- **Grafana ready**: Use the [SQLite datasource plugin](https://grafana.com/grafana/plugins/frser-sqlite-datasource/) to query and visualize directly — no custom code needed
+- **Prometheus exporter**: Optional `/metrics` endpoint for real-time Grafana monitoring via SSH tunnel
+- **Grafana ready**: Use the [SQLite datasource plugin](https://grafana.com/grafana/plugins/frser-sqlite-datasource/) or built-in Prometheus datasource
 - **Single static binary**: Statically linked with musl, just `scp` to any Linux machine and run
 - **All metric types**: Gauge, Sum (Counter), Histogram, Exponential Histogram, Summary
 
@@ -63,12 +64,16 @@ ls target/x86_64-unknown-linux-musl/release/otel_dumper
 # With JSONL output for local inspection
 ./otel_dumper --jsonl-path ./metrics.jsonl
 
+# With Prometheus exporter for real-time Grafana
+./otel_dumper --prom-port 9090
+
 # Custom configuration
 ./otel_dumper \
   --grpc-port 14317 \
   --http-port 14318 \
   --db-path ./metrics.db \
   --jsonl-path ./metrics.jsonl \
+  --prom-port 9090 \
   --batch-size 50000 \
   --flush-interval-ms 500 \
   --max-rows 100000000
@@ -82,10 +87,30 @@ ls target/x86_64-unknown-linux-musl/release/otel_dumper
 | `--http-port` | `4318` | HTTP OTLP server port |
 | `--db-path` | `metrics.db` | SQLite database file path |
 | `--jsonl-path` | *(none)* | JSONL output file path (optional, for local inspection) |
+| `--prom-port` | *(none)* | Prometheus exporter port (optional, exposes `/metrics`) |
 | `--batch-size` | `50000` | Flush to SQLite after this many data points |
 | `--flush-interval-ms` | `500` | Flush interval even if batch is not full |
 | `--channel-capacity` | `10000` | Internal channel buffer size |
 | `--max-rows` | `0` | Max rows to write, 0=unlimited |
+
+## Prometheus Exporter
+
+When `--prom-port` is specified, otel_dumper exposes a `/metrics` endpoint with the latest values in Prometheus text format. This is useful for real-time Grafana dashboards, especially when Grafana is on a different machine that can only reach the target via SSH.
+
+```bash
+# On the target machine (dut)
+./otel_dumper --prom-port 9090
+
+# On your dev machine (where Grafana runs), create an SSH tunnel
+ssh -L 9090:127.0.0.1:9090 user@dut
+
+# In Grafana: add Prometheus datasource → http://localhost:9090
+```
+
+Then query with PromQL:
+```
+sai_counter_type_1_stat_0{object_name="Ethernet32"}
+```
 
 ## JSONL Output
 

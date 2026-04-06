@@ -23,6 +23,10 @@ pub struct Config {
     #[arg(long)]
     pub jsonl_path: Option<PathBuf>,
 
+    /// Prometheus exporter port (optional, exposes /metrics endpoint)
+    #[arg(long)]
+    pub prom_port: Option<u16>,
+
     /// Batch size: flush to SQLite when this many data points accumulate
     #[arg(long, default_value_t = 50_000)]
     pub batch_size: usize,

@@ -216,7 +216,8 @@ async fn test_e2e_full_pipeline() {
         rx,
         storage.clone(),
         Some(jsonl),
-        100, // small batch for testing
+        None, // prom_store
+        100,  // small batch for testing
         Duration::from_millis(100),
         0,
     );

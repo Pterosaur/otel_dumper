@@ -11,7 +11,8 @@
 - **双协议支持**: gRPC (`:4317`) 和 HTTP (`:4318`) OTLP 端点
 - **高吞吐**: 针对 ~10万 data points/秒 设计，批量写入 SQLite
 - **双输出格式**: SQLite 用于 Grafana 查询 + 可选 JSONL 用于本地直观阅读
-- **Grafana 就绪**: 使用 [SQLite 数据源插件](https://grafana.com/grafana/plugins/frser-sqlite-datasource/) 直接查询和可视化，无需额外代码
+- **Prometheus 导出**: 可选 `/metrics` 端点，通过 SSH 隧道实现远程实时 Grafana 监控
+- **Grafana 就绪**: 使用 [SQLite 数据源插件](https://grafana.com/grafana/plugins/frser-sqlite-datasource/) 或内置 Prometheus 数据源
 - **单文件静态二进制**: 使用 musl 全静态链接，直接 `scp` 到任意 Linux 机器运行
 - **全指标类型**: Gauge、Sum (Counter)、Histogram、Exponential Histogram、Summary
 
@@ -82,10 +83,30 @@ ls target/x86_64-unknown-linux-musl/release/otel_dumper
 | `--http-port` | `4318` | HTTP OTLP 服务端口 |
 | `--db-path` | `metrics.db` | SQLite 数据库文件路径 |
 | `--jsonl-path` | *（无）* | JSONL 输出文件路径（可选，用于本地直观阅读） |
+| `--prom-port` | *（无）* | Prometheus 导出端口（可选，暴露 `/metrics` 端点） |
 | `--batch-size` | `50000` | 积累多少数据点后批量写入 SQLite |
 | `--flush-interval-ms` | `500` | 定时刷盘间隔（毫秒），即使批次未满也会写入 |
 | `--channel-capacity` | `10000` | 内部通道缓冲大小 |
 | `--max-rows` | `0` | 最大写入行数，0 表示不限制 |
+
+## Prometheus 导出
+
+指定 `--prom-port` 后，otel_dumper 会暴露一个 `/metrics` 端点，以 Prometheus 文本格式输出最新指标值。特别适合 Grafana 在另一台机器上、只能通过 SSH 访问目标机器的场景。
+
+```bash
+# 在目标机器 (dut) 上
+./otel_dumper --prom-port 9090
+
+# 在你的开发机（Grafana 所在的机器），建立 SSH 隧道
+ssh -L 9090:127.0.0.1:9090 user@dut
+
+# 在 Grafana 中：添加 Prometheus 数据源 → http://localhost:9090
+```
+
+然后用 PromQL 查询：
+```
+sai_counter_type_1_stat_0{object_name="Ethernet32"}
+```
 
 ## JSONL 输出
 
