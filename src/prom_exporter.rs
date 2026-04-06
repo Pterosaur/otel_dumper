@@ -1,6 +1,7 @@
 use crate::converter::FlatDataPoint;
 use std::collections::HashMap;
 use std::sync::{Arc, RwLock};
+use std::time::{SystemTime, UNIX_EPOCH};
 
 /// Key for a unique metric time series: (metric_name, sorted_label_pairs)
 type SeriesKey = (String, Vec<(String, String)>);
@@ -11,6 +12,7 @@ struct SeriesValue {
     value_int: Option<i64>,
     hist_count: Option<i64>,
     hist_sum: Option<f64>,
+    timestamp: f64, // Unix seconds
 }
 
 /// Thread-safe store of latest metric values, rendered as Prometheus text on demand.
@@ -33,6 +35,10 @@ impl MetricsStore {
 
     /// Update the store with a batch of data points (keeps latest value per series).
     pub fn update(&self, points: &[FlatDataPoint]) {
+        let now = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_secs_f64();
         let mut map = self.series.write().unwrap();
         for p in points {
             let labels = parse_labels(p.dp_attrs.as_deref());
@@ -45,6 +51,7 @@ impl MetricsStore {
                     value_int: p.value_int,
                     hist_count: p.hist_count,
                     hist_sum: p.hist_sum,
+                    timestamp: now,
                 },
             );
         }
@@ -108,6 +115,120 @@ impl MetricsStore {
             }
         }
         out
+    }
+
+    /// Build instant query result for Prometheus API.
+    pub fn query_instant(&self, query: &str) -> serde_json::Value {
+        let map = self.series.read().unwrap();
+        let mut results = Vec::new();
+
+        // Parse simple PromQL: metric_name or metric_name{label="value",...}
+        let (metric_name, label_filters) = parse_promql(query);
+        let prom_name = sanitize_metric_name(&metric_name);
+
+        for ((name, labels), val) in map.iter() {
+            let sname = sanitize_metric_name(name);
+
+            // Match metric name
+            if !prom_name.is_empty() && sname != prom_name {
+                continue;
+            }
+
+            // Match label filters
+            if !label_filters
+                .iter()
+                .all(|(fk, fv)| labels.iter().any(|(lk, lv)| lk == fk && lv == fv))
+            {
+                continue;
+            }
+
+            if val.metric_type == "histogram" {
+                // Expose _sum and _count as separate results
+                if let Some(s) = val.hist_sum {
+                    let m = build_metric_map(&format!("{sname}_sum"), labels);
+                    results.push(serde_json::json!({
+                        "metric": m,
+                        "value": [val.timestamp, s.to_string()]
+                    }));
+                }
+                if let Some(c) = val.hist_count {
+                    let m = build_metric_map(&format!("{sname}_count"), labels);
+                    results.push(serde_json::json!({
+                        "metric": m,
+                        "value": [val.timestamp, c.to_string()]
+                    }));
+                }
+            } else {
+                let value_str = val
+                    .value_double
+                    .map(|v| v.to_string())
+                    .or_else(|| val.value_int.map(|v| v.to_string()))
+                    .unwrap_or_else(|| "0".to_string());
+                let m = build_metric_map(&sname, labels);
+                results.push(serde_json::json!({
+                    "metric": m,
+                    "value": [val.timestamp, value_str]
+                }));
+            }
+        }
+
+        serde_json::json!({
+            "status": "success",
+            "data": {
+                "resultType": "vector",
+                "result": results
+            }
+        })
+    }
+
+    /// Return all known metric names.
+    pub fn label_values_name(&self) -> Vec<String> {
+        let map = self.series.read().unwrap();
+        let mut names: Vec<String> = map
+            .keys()
+            .map(|(name, _)| sanitize_metric_name(name))
+            .collect();
+        names.sort();
+        names.dedup();
+        names
+    }
+}
+
+fn build_metric_map(
+    name: &str,
+    labels: &[(String, String)],
+) -> serde_json::Map<String, serde_json::Value> {
+    let mut m = serde_json::Map::new();
+    m.insert(
+        "__name__".to_string(),
+        serde_json::Value::String(name.to_string()),
+    );
+    for (k, v) in labels {
+        m.insert(k.clone(), serde_json::Value::String(v.clone()));
+    }
+    m
+}
+
+/// Parse simple PromQL like `metric_name{label="value",label2="value2"}`
+fn parse_promql(query: &str) -> (String, Vec<(String, String)>) {
+    let query = query.trim();
+    if let Some(brace_start) = query.find('{') {
+        let name = query[..brace_start].to_string();
+        let brace_end = query.rfind('}').unwrap_or(query.len());
+        let labels_str = &query[brace_start + 1..brace_end];
+        let filters: Vec<(String, String)> = labels_str
+            .split(',')
+            .filter_map(|pair| {
+                let pair = pair.trim();
+                let eq = pair.find('=')?;
+                let key = pair[..eq].trim().to_string();
+                let val = pair[eq + 1..].trim().trim_matches('"').to_string();
+                Some((key, val))
+            })
+            .collect();
+        (name, filters)
+    } else {
+        (query.to_string(), vec![])
     }
 }
 
@@ -174,12 +295,23 @@ fn escape_label_value(val: &str) -> String {
         .replace('\n', "\\n")
 }
 
-/// Start the Prometheus metrics HTTP server.
+/// Start the Prometheus-compatible HTTP server.
 pub async fn run(store: Arc<MetricsStore>, port: u16) -> Result<(), std::io::Error> {
     use axum::{routing::get, Router};
 
     let app = Router::new()
         .route("/metrics", get(handle_metrics))
+        .route("/api/v1/query", get(handle_query).post(handle_query))
+        .route(
+            "/api/v1/query_range",
+            get(handle_query_range).post(handle_query_range),
+        )
+        .route(
+            "/api/v1/label/__name__/values",
+            get(handle_label_values_name),
+        )
+        .route("/api/v1/labels", get(handle_labels))
+        .route("/api/v1/status/buildinfo", get(handle_buildinfo))
         .with_state(store);
 
     let listener = tokio::net::TcpListener::bind(format!("0.0.0.0:{port}")).await?;
@@ -199,6 +331,109 @@ async fn handle_metrics(
         )],
         body,
     )
+}
+
+#[derive(serde::Deserialize)]
+struct QueryParams {
+    query: Option<String>,
+}
+
+async fn handle_query(
+    axum::extract::State(store): axum::extract::State<Arc<MetricsStore>>,
+    axum::extract::Query(params): axum::extract::Query<QueryParams>,
+) -> axum::Json<serde_json::Value> {
+    let query = params.query.unwrap_or_default();
+    axum::Json(store.query_instant(&query))
+}
+
+#[derive(serde::Deserialize)]
+struct QueryRangeParams {
+    query: Option<String>,
+    #[allow(dead_code)]
+    start: Option<String>,
+    #[allow(dead_code)]
+    end: Option<String>,
+    #[allow(dead_code)]
+    step: Option<String>,
+}
+
+async fn handle_query_range(
+    axum::extract::State(store): axum::extract::State<Arc<MetricsStore>>,
+    axum::extract::Query(params): axum::extract::Query<QueryRangeParams>,
+) -> axum::Json<serde_json::Value> {
+    // We only have latest values, so return them as a single-point matrix
+    let query = params.query.unwrap_or_default();
+    let instant = store.query_instant(&query);
+
+    // Convert vector result to matrix format
+    let results = instant["data"]["result"]
+        .as_array()
+        .cloned()
+        .unwrap_or_default();
+    let matrix_results: Vec<serde_json::Value> = results
+        .into_iter()
+        .map(|mut r| {
+            if let Some(val) = r.get("value").cloned() {
+                r.as_object_mut()
+                    .unwrap()
+                    .insert("values".to_string(), serde_json::json!([val]));
+                r.as_object_mut().unwrap().remove("value");
+            }
+            r
+        })
+        .collect();
+
+    axum::Json(serde_json::json!({
+        "status": "success",
+        "data": {
+            "resultType": "matrix",
+            "result": matrix_results
+        }
+    }))
+}
+
+async fn handle_label_values_name(
+    axum::extract::State(store): axum::extract::State<Arc<MetricsStore>>,
+) -> axum::Json<serde_json::Value> {
+    let names = store.label_values_name();
+    axum::Json(serde_json::json!({
+        "status": "success",
+        "data": names
+    }))
+}
+
+async fn handle_labels(
+    axum::extract::State(store): axum::extract::State<Arc<MetricsStore>>,
+) -> axum::Json<serde_json::Value> {
+    let mut labels = vec!["__name__".to_string()];
+    let map = store.series.read().unwrap();
+    let mut seen = std::collections::HashSet::new();
+    for ((_, series_labels), _) in map.iter() {
+        for (k, _) in series_labels {
+            if seen.insert(k.clone()) {
+                labels.push(k.clone());
+            }
+        }
+    }
+    labels.sort();
+    axum::Json(serde_json::json!({
+        "status": "success",
+        "data": labels
+    }))
+}
+
+async fn handle_buildinfo() -> axum::Json<serde_json::Value> {
+    axum::Json(serde_json::json!({
+        "status": "success",
+        "data": {
+            "version": "otel_dumper",
+            "revision": "",
+            "branch": "",
+            "buildUser": "",
+            "buildDate": "",
+            "goVersion": ""
+        }
+    }))
 }
 
 #[cfg(test)]
