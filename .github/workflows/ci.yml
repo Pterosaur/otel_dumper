@@ -73,7 +73,12 @@ jobs:
           chmod +x ./artifact/otel_dumper
           mv ./artifact/otel_dumper ./otel_dumper-x86_64-linux
 
-      - name: Update latest release
+      - name: Delete old latest release
+        run: gh release delete latest --yes --cleanup-tag || true
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Create latest release
         uses: softprops/action-gh-release@v2
         with:
           tag_name: latest
