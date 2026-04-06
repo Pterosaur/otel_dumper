@@ -104,6 +104,60 @@ impl MetricsStore {
         }
     }
 
+    /// Fast update from pre-parsed data (labels already parsed outside the lock).
+    #[allow(clippy::type_complexity)]
+    pub fn update_prepared(
+        &self,
+        prepared: &[(
+            String,
+            &'static str,
+            Vec<(String, String)>,
+            f64,
+            Option<f64>,
+            Option<i64>,
+        )],
+    ) {
+        let now = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_secs_f64();
+        let cutoff = self.retention.map(|r| now - r.as_secs_f64());
+        let keep_history = self.retention.is_some();
+
+        let mut map = self.series.lock().unwrap();
+        for (metric_name, metric_type, labels, value, hist_sum, hist_count) in prepared {
+            if *metric_type == "histogram" {
+                if let Some(s) = hist_sum {
+                    let key = (format!("{metric_name}_sum"), labels.clone());
+                    push_sample(&mut map, key, metric_type, now, *s, cutoff, keep_history);
+                }
+                if let Some(c) = hist_count {
+                    let key = (format!("{metric_name}_count"), labels.clone());
+                    push_sample(
+                        &mut map,
+                        key,
+                        metric_type,
+                        now,
+                        *c as f64,
+                        cutoff,
+                        keep_history,
+                    );
+                }
+            } else {
+                let key = (metric_name.clone(), labels.clone());
+                push_sample(
+                    &mut map,
+                    key,
+                    metric_type,
+                    now,
+                    *value,
+                    cutoff,
+                    keep_history,
+                );
+            }
+        }
+    }
+
     /// Render all metrics in Prometheus text exposition format (latest value only).
     pub fn render(&self) -> String {
         let map = self.series.lock().unwrap();
@@ -327,6 +381,11 @@ fn parse_promql(query: &str) -> (String, Vec<(String, String)>) {
     } else {
         (query.to_string(), vec![])
     }
+}
+
+/// Public wrapper for label parsing (used by writer to pre-parse outside the lock).
+pub fn parse_labels_public(dp_attrs: Option<&str>) -> Vec<(String, String)> {
+    parse_labels(dp_attrs)
 }
 
 fn parse_labels(dp_attrs: Option<&str>) -> Vec<(String, String)> {

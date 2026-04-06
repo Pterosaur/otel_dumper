@@ -19,10 +19,15 @@ impl MetricsService for OtlpMetricsService {
         let inner = request.into_inner();
         let points = converter::convert_request(inner);
         if !points.is_empty() {
-            self.tx
-                .send(points)
-                .await
-                .map_err(|_| Status::internal("writer channel closed"))?;
+            match self.tx.try_send(points) {
+                Ok(()) => {}
+                Err(tokio::sync::mpsc::error::TrySendError::Full(_)) => {
+                    tracing::warn!("Channel full, dropping batch");
+                }
+                Err(tokio::sync::mpsc::error::TrySendError::Closed(_)) => {
+                    return Err(Status::internal("writer channel closed"));
+                }
+            }
         }
         Ok(Response::new(ExportMetricsServiceResponse::default()))
     }

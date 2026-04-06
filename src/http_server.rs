@@ -35,9 +35,15 @@ async fn handle_metrics(
 
     let points = converter::convert_request(request);
     if !points.is_empty() {
-        tx.send(points)
-            .await
-            .map_err(|_| (StatusCode::INTERNAL_SERVER_ERROR, "writer closed".into()))?;
+        match tx.try_send(points) {
+            Ok(()) => {}
+            Err(tokio::sync::mpsc::error::TrySendError::Full(_)) => {
+                tracing::warn!("Channel full, dropping batch");
+            }
+            Err(tokio::sync::mpsc::error::TrySendError::Closed(_)) => {
+                return Err((StatusCode::INTERNAL_SERVER_ERROR, "writer closed".into()));
+            }
+        }
     }
 
     let response = ExportMetricsServiceResponse::default();
