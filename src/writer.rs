@@ -90,16 +90,18 @@ async fn run_writer(
             _ = stats_interval.tick(), if first_data_received => {
                 let elapsed = last_report_time.elapsed();
                 let new_rows = total_rows - last_report_rows;
-                let rate = new_rows as f64 / elapsed.as_secs_f64();
-                tracing::info!(
-                    "Stats: {total_rows} total rows, {total_requests} requests | \
-                     {new_rows} rows in {:.1}s ({:.0} rows/s), buffer={}",
-                    elapsed.as_secs_f64(),
-                    rate,
-                    buffer.len(),
-                );
-                last_report_rows = total_rows;
-                last_report_time = tokio::time::Instant::now();
+                if new_rows > 0 {
+                    let rate = new_rows as f64 / elapsed.as_secs_f64();
+                    tracing::info!(
+                        "Stats: {total_rows} total rows, {total_requests} requests | \
+                         {new_rows} rows in {:.1}s ({:.0} rows/s), buffer={}",
+                        elapsed.as_secs_f64(),
+                        rate,
+                        buffer.len(),
+                    );
+                    last_report_rows = total_rows;
+                    last_report_time = tokio::time::Instant::now();
+                }
             }
         }
     }
