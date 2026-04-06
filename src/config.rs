@@ -33,6 +33,10 @@ pub struct Config {
     #[arg(long)]
     pub prom_history: Option<String>,
 
+    /// SQLite query API port (optional, exposes HTTP endpoint for remote SQL queries)
+    #[arg(long)]
+    pub sqlite_port: Option<u16>,
+
     /// Batch size: flush to SQLite when this many data points accumulate
     #[arg(long, default_value_t = 50_000)]
     pub batch_size: usize,

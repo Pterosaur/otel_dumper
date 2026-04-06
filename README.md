@@ -88,10 +88,45 @@ ls target/x86_64-unknown-linux-musl/release/otel_dumper
 | `--db-path` | `metrics.db` | SQLite database file path |
 | `--jsonl-path` | *(none)* | JSONL output file path (optional, for local inspection) |
 | `--prom-port` | *(none)* | Prometheus exporter port (optional, exposes `/metrics`) |
+| `--prom-history` | *(none)* | Prometheus history retention (e.g. "30 mins", "24 hours") |
+| `--sqlite-port` | *(none)* | SQLite query API port (optional, for remote SQL queries) |
 | `--batch-size` | `50000` | Flush to SQLite after this many data points |
 | `--flush-interval-ms` | `500` | Flush interval even if batch is not full |
 | `--channel-capacity` | `10000` | Internal channel buffer size |
 | `--max-rows` | `0` | Max rows to write, 0=unlimited |
+
+## SQLite Query API
+
+When `--sqlite-port` is specified, otel_dumper exposes a read-only HTTP API for remote SQL queries against the SQLite database. This gives you **nanosecond precision** timestamps over the network — useful when Grafana is on a different machine.
+
+```bash
+# On the target machine (dut)
+./otel_dumper --sqlite-port 8080
+
+# On your dev machine, create an SSH tunnel
+ssh -L 8080:127.0.0.1:8080 user@dut
+
+# Query from anywhere
+curl "http://localhost:8080/api/query?sql=SELECT+timestamp_ns,value_int+FROM+metric_data_points+LIMIT+5"
+```
+
+### API Endpoints
+
+| Endpoint | Description |
+|----------|-------------|
+| `GET /api/query?sql=...&limit=10000` | Execute a read-only SELECT query, returns JSON |
+| `GET /api/tables` | List all tables |
+| `GET /api/schema` | Show metric_data_points column info |
+| `GET /health` | Health check |
+
+Only `SELECT` queries are allowed — `INSERT`, `UPDATE`, `DELETE`, `DROP` are rejected.
+
+### Grafana Integration (Infinity Plugin)
+
+1. Install the [Infinity datasource plugin](https://grafana.com/grafana/plugins/yesoreyeram-infinity-datasource/)
+2. Add a new Infinity datasource
+3. Use **URL** type, set base URL to `http://localhost:8080`
+4. Create a panel with URL: `/api/query?sql=SELECT timestamp_ns/1000000000.0 AS time, value_int AS value FROM metric_data_points WHERE metric_name='your_metric' ORDER BY timestamp_ns`
 
 ## Prometheus Exporter
 

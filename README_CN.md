@@ -84,10 +84,38 @@ ls target/x86_64-unknown-linux-musl/release/otel_dumper
 | `--db-path` | `metrics.db` | SQLite 数据库文件路径 |
 | `--jsonl-path` | *（无）* | JSONL 输出文件路径（可选，用于本地直观阅读） |
 | `--prom-port` | *（无）* | Prometheus 导出端口（可选，暴露 `/metrics` 端点） |
+| `--prom-history` | *（无）* | Prometheus 历史保留窗口（如 "30 mins"、"24 hours"） |
+| `--sqlite-port` | *（无）* | SQLite 查询 API 端口（可选，远程 SQL 查询） |
 | `--batch-size` | `50000` | 积累多少数据点后批量写入 SQLite |
 | `--flush-interval-ms` | `500` | 定时刷盘间隔（毫秒），即使批次未满也会写入 |
 | `--channel-capacity` | `10000` | 内部通道缓冲大小 |
 | `--max-rows` | `0` | 最大写入行数，0 表示不限制 |
+
+## SQLite 查询 API
+
+指定 `--sqlite-port` 后，otel_dumper 会暴露一个只读 HTTP API，支持远程 SQL 查询 SQLite 数据库。可以获得**纳秒精度**的时间戳。
+
+```bash
+# 在目标机器 (dut) 上
+./otel_dumper --sqlite-port 8080
+
+# 在开发机建立 SSH 隧道
+ssh -L 8080:127.0.0.1:8080 user@dut
+
+# 远程查询
+curl "http://localhost:8080/api/query?sql=SELECT+timestamp_ns,value_int+FROM+metric_data_points+LIMIT+5"
+```
+
+### API 端点
+
+| 端点 | 描述 |
+|------|------|
+| `GET /api/query?sql=...&limit=10000` | 执行只读 SELECT 查询，返回 JSON |
+| `GET /api/tables` | 列出所有表 |
+| `GET /api/schema` | 显示 metric_data_points 列信息 |
+| `GET /health` | 健康检查 |
+
+只允许 `SELECT` 查询，`INSERT`、`UPDATE`、`DELETE`、`DROP` 会被拒绝。
 
 ## Prometheus 导出
 

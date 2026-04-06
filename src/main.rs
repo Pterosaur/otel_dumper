@@ -1,6 +1,8 @@
 use clap::Parser;
 use otel_dumper::config::Config;
-use otel_dumper::{grpc_server, http_server, jsonl_writer, prom_exporter, storage, writer};
+use otel_dumper::{
+    grpc_server, http_server, jsonl_writer, prom_exporter, sqlite_api, storage, writer,
+};
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -89,6 +91,17 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             }
         })
     });
+    let sqlite_handle = config.sqlite_port.map(|port| {
+        let qs = Arc::new(
+            sqlite_api::QueryServer::new(&config.db_path)
+                .expect("Failed to open read-only SQLite connection for query API"),
+        );
+        tokio::spawn(async move {
+            if let Err(e) = sqlite_api::run(qs, port).await {
+                tracing::error!("SQLite query API failed: {e}");
+            }
+        })
+    });
 
     // Wait for Ctrl+C, or both servers dying (e.g. port conflict)
     tokio::select! {
@@ -100,6 +113,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             let _ = grpc_handle.await;
             let _ = http_handle.await;
             if let Some(h) = prom_handle { h.abort(); }
+            if let Some(h) = sqlite_handle { h.abort(); }
         }
         _ = async {
             let (_, _) = tokio::join!(&mut grpc_handle, &mut http_handle);
