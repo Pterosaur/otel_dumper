@@ -69,12 +69,17 @@ pub struct QueryResult {
 }
 
 fn row_value_to_json(row: &rusqlite::Row, idx: usize) -> serde_json::Value {
-    // Try each type in order
+    // Try f64 first to preserve decimal precision (e.g. timestamp_ns/1e9)
+    // then i64 for pure integers, then String as fallback
+    if let Ok(v) = row.get::<_, f64>(idx) {
+        // Check if it's actually an integer value (no fractional part)
+        if v.fract() == 0.0 && v.abs() < i64::MAX as f64 {
+            return serde_json::Value::Number((v as i64).into());
+        }
+        return serde_json::json!(v);
+    }
     if let Ok(v) = row.get::<_, i64>(idx) {
         return serde_json::Value::Number(v.into());
-    }
-    if let Ok(v) = row.get::<_, f64>(idx) {
-        return serde_json::json!(v);
     }
     if let Ok(v) = row.get::<_, String>(idx) {
         return serde_json::Value::String(v);
