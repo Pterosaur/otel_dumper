@@ -127,10 +127,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     drop(tx);
 
     // Writer will flush remaining data and exit (with timeout safety net)
-    match tokio::time::timeout(Duration::from_secs(30), writer_handle).await {
+    match tokio::time::timeout(Duration::from_secs(10), writer_handle).await {
         Ok(Ok(())) => {}
         Ok(Err(e)) => tracing::error!("Writer task error: {e}"),
-        Err(_) => tracing::warn!("Writer shutdown timed out after 30s, forcing exit"),
+        Err(_) => tracing::warn!("Writer shutdown timed out after 10s, forcing exit"),
     }
 
     // Build analysis indexes after writing is complete
