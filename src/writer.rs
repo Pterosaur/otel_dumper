@@ -4,9 +4,11 @@ use crate::prom_exporter::MetricsStore;
 use crate::storage::Storage;
 use std::sync::Arc;
 use std::time::Duration;
-use tokio::sync::mpsc;
+use tokio::sync::{mpsc, watch};
 use tokio::task::JoinHandle;
 
+/// Start the writer. Returns (handle, shutdown_trigger).
+/// Send `true` on shutdown_trigger to tell the writer to stop.
 pub fn start_writer(
     rx: mpsc::Receiver<Vec<FlatDataPoint>>,
     storage: Arc<Storage>,
@@ -15,8 +17,9 @@ pub fn start_writer(
     batch_size: usize,
     flush_interval: Duration,
     max_rows: u64,
-) -> JoinHandle<()> {
-    tokio::spawn(run_writer(
+) -> (JoinHandle<()>, watch::Sender<bool>) {
+    let (shutdown_tx, shutdown_rx) = watch::channel(false);
+    let handle = tokio::spawn(run_writer(
         rx,
         storage,
         jsonl,
@@ -24,9 +27,12 @@ pub fn start_writer(
         batch_size,
         flush_interval,
         max_rows,
-    ))
+        shutdown_rx,
+    ));
+    (handle, shutdown_tx)
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn run_writer(
     mut rx: mpsc::Receiver<Vec<FlatDataPoint>>,
     storage: Arc<Storage>,
@@ -35,6 +41,7 @@ async fn run_writer(
     batch_size: usize,
     flush_interval: Duration,
     max_rows: u64,
+    mut shutdown_rx: watch::Receiver<bool>,
 ) {
     let mut buffer: Vec<FlatDataPoint> = Vec::with_capacity(batch_size * 2);
     let mut interval = tokio::time::interval(flush_interval);
@@ -51,6 +58,15 @@ async fn run_writer(
 
     loop {
         tokio::select! {
+            _ = shutdown_rx.changed() => {
+                if *shutdown_rx.borrow() {
+                    // Shutdown signal received — flush and exit
+                    if !buffer.is_empty() {
+                        total_rows += flush(&storage, &jsonl, &prom_store, &mut buffer).await;
+                    }
+                    break;
+                }
+            }
             batch = rx.recv() => {
                 match batch {
                     Some(points) => {
@@ -190,7 +206,7 @@ mod tests {
         let storage = Arc::new(Storage::new(&dir.path().join("test.db")).unwrap());
         let (tx, rx) = mpsc::channel(100);
 
-        let handle = start_writer(
+        let (handle, _shutdown) = start_writer(
             rx,
             storage.clone(),
             None,
@@ -215,7 +231,7 @@ mod tests {
         let (tx, rx) = mpsc::channel(100);
 
         // batch_size=50, so sending 60 points should trigger a flush
-        let handle = start_writer(
+        let (handle, _shutdown) = start_writer(
             rx,
             storage.clone(),
             None,
@@ -242,7 +258,7 @@ mod tests {
         let storage = Arc::new(Storage::new(&dir.path().join("test.db")).unwrap());
         let (tx, rx) = mpsc::channel(100);
 
-        let handle = start_writer(
+        let (handle, _shutdown) = start_writer(
             rx,
             storage.clone(),
             None,
@@ -268,7 +284,7 @@ mod tests {
         let (tx, rx) = mpsc::channel(100);
 
         // Large batch_size but short flush interval
-        let handle = start_writer(
+        let (handle, _shutdown) = start_writer(
             rx,
             storage.clone(),
             None,

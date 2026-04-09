@@ -212,7 +212,7 @@ async fn test_e2e_full_pipeline() {
     let jsonl = Arc::new(jsonl_writer::JsonlWriter::new(&jsonl_path).unwrap());
     let (tx, rx) = mpsc::channel(1000);
 
-    let writer_handle = writer::start_writer(
+    let (writer_handle, _writer_shutdown) = writer::start_writer(
         rx,
         storage.clone(),
         Some(jsonl),

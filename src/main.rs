@@ -55,7 +55,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let (tx, rx) = tokio::sync::mpsc::channel(config.channel_capacity);
 
-    let writer_handle = writer::start_writer(
+    let (writer_handle, writer_shutdown) = writer::start_writer(
         rx,
         storage.clone(),
         jsonl,
@@ -123,10 +123,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
     }
 
-    // 2. Close channel — no more data can be sent
+    // 2. Signal writer to flush and stop (doesn't depend on channel close)
+    let _ = writer_shutdown.send(true);
+
+    // 3. Close channel
     drop(tx);
 
-    // 3. Wait for writer to drain remaining buffer
+    // 4. Wait for writer to drain remaining buffer
     tracing::info!("Waiting for writer to flush remaining data...");
     match tokio::time::timeout(Duration::from_secs(10), writer_handle).await {
         Ok(Ok(())) => {
@@ -136,7 +139,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         Err(_) => tracing::warn!("Writer shutdown timed out after 10s, dropping remaining data"),
     }
 
-    // 4. Build analysis indexes
+    // 5. Build analysis indexes
     tracing::info!("Building analysis indexes...");
     if let Err(e) = storage.create_analysis_indexes() {
         tracing::error!("Failed to create indexes: {e}");
