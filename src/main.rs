@@ -107,7 +107,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     tokio::select! {
         _ = tokio::signal::ctrl_c() => {
             tracing::info!("Received Ctrl+C, shutting down...");
-            // Abort servers and wait for them to actually drop their senders
+            // 1. Stop accepting new requests
             grpc_handle.abort();
             http_handle.abort();
             let _ = grpc_handle.await;
@@ -119,21 +119,23 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             let (_, _) = tokio::join!(&mut grpc_handle, &mut http_handle);
         } => {
             tracing::error!("All servers exited, shutting down...");
-            // Both tasks already completed — senders already dropped
         }
     }
 
-    // Drop main's sender — now all senders are gone
+    // 2. Close channel — no more data can be sent
     drop(tx);
 
-    // Writer will flush remaining data and exit (with timeout safety net)
+    // 3. Wait for writer to drain remaining buffer
+    tracing::info!("Waiting for writer to flush remaining data...");
     match tokio::time::timeout(Duration::from_secs(10), writer_handle).await {
-        Ok(Ok(())) => {}
+        Ok(Ok(())) => {
+            tracing::info!("Writer drained successfully");
+        }
         Ok(Err(e)) => tracing::error!("Writer task error: {e}"),
-        Err(_) => tracing::warn!("Writer shutdown timed out after 10s, forcing exit"),
+        Err(_) => tracing::warn!("Writer shutdown timed out after 10s, dropping remaining data"),
     }
 
-    // Build analysis indexes after writing is complete
+    // 4. Build analysis indexes
     tracing::info!("Building analysis indexes...");
     if let Err(e) = storage.create_analysis_indexes() {
         tracing::error!("Failed to create indexes: {e}");
