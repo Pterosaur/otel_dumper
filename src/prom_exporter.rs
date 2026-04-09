@@ -52,7 +52,9 @@ impl MetricsStore {
         });
         let keep_history = self.retention.is_some();
 
-        // Pre-parse labels and values outside the lock
+        // Pre-parse labels with caching (same dp_attrs string → same labels)
+        let mut label_cache: HashMap<Option<String>, Vec<(String, String)>> = HashMap::new();
+
         struct Prepared {
             key: (String, Vec<(String, String)>),
             metric_type: &'static str,
@@ -61,7 +63,10 @@ impl MetricsStore {
         }
         let mut batch: Vec<Prepared> = Vec::with_capacity(points.len() * 2);
         for p in points {
-            let labels = parse_labels(p.dp_attrs.as_deref());
+            let labels = label_cache
+                .entry(p.dp_attrs.clone())
+                .or_insert_with(|| parse_labels(p.dp_attrs.as_deref()))
+                .clone();
             let ts = p.timestamp_ns as f64 / 1_000_000_000.0;
 
             if p.metric_type == "histogram" {
