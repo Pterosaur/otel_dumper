@@ -110,8 +110,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             // 1. Stop accepting new requests
             grpc_handle.abort();
             http_handle.abort();
-            let _ = grpc_handle.await;
-            let _ = http_handle.await;
+            // Wait briefly for servers to stop (don't block forever)
+            let _ = tokio::time::timeout(Duration::from_secs(2), grpc_handle).await;
+            let _ = tokio::time::timeout(Duration::from_secs(2), http_handle).await;
             if let Some(h) = prom_handle { h.abort(); }
             if let Some(h) = sqlite_handle { h.abort(); }
         }
