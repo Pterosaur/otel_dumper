@@ -16,7 +16,8 @@ impl Storage {
              PRAGMA synchronous = NORMAL;
              PRAGMA cache_size = -64000;
              PRAGMA temp_store = MEMORY;
-             PRAGMA mmap_size = 268435456;",
+             PRAGMA mmap_size = 268435456;
+             PRAGMA wal_autocheckpoint = 0;",
         )?;
 
         conn.execute_batch(
@@ -98,7 +99,8 @@ impl Storage {
         let conn = self.conn.lock().unwrap();
         conn.execute_batch(
             "CREATE INDEX IF NOT EXISTS idx_name_ts ON metric_data_points(metric_name, timestamp_ns);
-             CREATE INDEX IF NOT EXISTS idx_type ON metric_data_points(metric_type);",
+             CREATE INDEX IF NOT EXISTS idx_type ON metric_data_points(metric_type);
+             PRAGMA wal_checkpoint(TRUNCATE);",
         )?;
         Ok(())
     }

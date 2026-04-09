@@ -14,7 +14,11 @@ impl QueryServer {
             db_path,
             rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY | rusqlite::OpenFlags::SQLITE_OPEN_NO_MUTEX,
         )?;
-        conn.execute_batch("PRAGMA query_only = ON;")?;
+        conn.execute_batch(
+            "PRAGMA query_only = ON;
+             PRAGMA wal_autocheckpoint = 0;
+             PRAGMA cache_size = -64000;",
+        )?;
         Ok(QueryServer {
             conn: Mutex::new(conn),
         })
