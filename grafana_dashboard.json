@@ -1,0 +1,295 @@
+{
+  "annotations": {
+    "list": []
+  },
+  "editable": true,
+  "fiscalYearStartMonth": 0,
+  "graphTooltip": 1,
+  "id": null,
+  "links": [],
+  "panels": [
+    {
+      "datasource": {
+        "type": "frser-sqlite-datasource",
+        "uid": "cfi7w8649fegwb"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "axisBorderShow": false,
+            "axisCenteredZero": false,
+            "axisColorMode": "text",
+            "axisLabel": "",
+            "axisPlacement": "auto",
+            "barAlignment": 0,
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "gradientMode": "none",
+            "hideFrom": {
+              "legend": false,
+              "tooltip": false,
+              "viz": false
+            },
+            "insertNulls": false,
+            "lineInterpolation": "linear",
+            "lineWidth": 1,
+            "pointSize": 5,
+            "scaleDistribution": {
+              "type": "linear"
+            },
+            "showPoints": "never",
+            "spanNulls": false,
+            "stacking": {
+              "group": "A",
+              "mode": "none"
+            },
+            "thresholdsStyle": {
+              "mode": "off"
+            }
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 16,
+        "w": 24,
+        "x": 0,
+        "y": 0
+      },
+      "id": 1,
+      "options": {
+        "legend": {
+          "calcs": [],
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "all",
+          "sort": "none"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "frser-sqlite-datasource",
+            "uid": "cfi7w8649fegwb"
+          },
+          "queryText": "WITH bounds AS (\n  SELECT\n    COALESCE(CAST(strftime('%s', NULLIF('${ts_start}','')) AS INTEGER) * 1000000000, (SELECT MIN(timestamp_ns) FROM metric_data_points)) AS t_start,\n    COALESCE(CAST(strftime('%s', NULLIF('${ts_end}','')) AS INTEGER) * 1000000000, (SELECT MAX(timestamp_ns) FROM metric_data_points)) AS t_end\n),\nparams AS (\n  SELECT t_start, t_end,\n    CASE WHEN ${max_points} > 0 THEN MAX(1, (t_end - t_start) / ${max_points}) ELSE 1 END AS bucket\n  FROM bounds\n),\nstat_names(type_id, stat_id, stat_name) AS (VALUES\n  -- Type 1: Port (204 entries)\n  (1,0,'IfInOctets'),\n  (1,1,'IfInUcastPkts'),\n  (1,2,'IfInNonUcastPkts'),\n  (1,3,'IfInDiscards'),\n  (1,4,'IfInErrors'),\n  (1,5,'IfInUnknownProtos'),\n  (1,6,'IfInBroadcastPkts'),\n  (1,7,'IfInMulticastPkts'),\n  (1,8,'IfInVlanDiscards'),\n  (1,9,'IfOutOctets'),\n  (1,10,'IfOutUcastPkts'),\n  (1,11,'IfOutNonUcastPkts'),\n  (1,12,'IfOutDiscards'),\n  (1,13,'IfOutErrors'),\n  (1,14,'IfOutQlen'),\n  (1,15,'IfOutBroadcastPkts'),\n  (1,16,'IfOutMulticastPkts'),\n  (1,17,'EtherStatsDropEvents'),\n  (1,18,'EtherStatsMulticastPkts'),\n  (1,19,'EtherStatsBroadcastPkts'),\n  (1,20,'EtherStatsUndersizePkts'),\n  (1,21,'EtherStatsFragments'),\n  (1,22,'EtherStatsPkts64Octets'),\n  (1,23,'EtherStatsPkts65To127Octets'),\n  (1,24,'EtherStatsPkts128To255Octets'),\n  (1,25,'EtherStatsPkts256To511Octets'),\n  (1,26,'EtherStatsPkts512To1023Octets'),\n  (1,27,'EtherStatsPkts1024To1518Octets'),\n  (1,28,'EtherStatsPkts1519To2047Octets'),\n  (1,29,'EtherStatsPkts2048To4095Octets'),\n  (1,30,'EtherStatsPkts4096To9216Octets'),\n  (1,31,'EtherStatsPkts9217To16383Octets'),\n  (1,32,'EtherStatsOversizePkts'),\n  (1,33,'EtherRxOversizePkts'),\n  (1,34,'EtherTxOversizePkts'),\n  (1,35,'EtherStatsJabbers'),\n  (1,36,'EtherStatsOctets'),\n  (1,37,'EtherStatsPkts'),\n  (1,38,'EtherStatsCollisions'),\n  (1,39,'EtherStatsCrcAlignErrors'),\n  (1,40,'EtherStatsTxNoErrors'),\n  (1,41,'EtherStatsRxNoErrors'),\n  (1,42,'IpInReceives'),\n  (1,43,'IpInOctets'),\n  (1,44,'IpInUcastPkts'),\n  (1,45,'IpInNonUcastPkts'),\n  (1,46,'IpInDiscards'),\n  (1,47,'IpOutOctets'),\n  (1,48,'IpOutUcastPkts'),\n  (1,49,'IpOutNonUcastPkts'),\n  (1,50,'IpOutDiscards'),\n  (1,51,'Ipv6InReceives'),\n  (1,52,'Ipv6InOctets'),\n  (1,53,'Ipv6InUcastPkts'),\n  (1,54,'Ipv6InNonUcastPkts'),\n  (1,55,'Ipv6InMcastPkts'),\n  (1,56,'Ipv6InDiscards'),\n  (1,57,'Ipv6OutOctets'),\n  (1,58,'Ipv6OutUcastPkts'),\n  (1,59,'Ipv6OutNonUcastPkts'),\n  (1,60,'Ipv6OutMcastPkts'),\n  (1,61,'Ipv6OutDiscards'),\n  (1,62,'GreenWredDroppedPackets'),\n  (1,63,'GreenWredDroppedBytes'),\n  (1,64,'YellowWredDroppedPackets'),\n  (1,65,'YellowWredDroppedBytes'),\n  (1,66,'RedWredDroppedPackets'),\n  (1,67,'RedWredDroppedBytes'),\n  (1,68,'WredDroppedPackets'),\n  (1,69,'WredDroppedBytes'),\n  (1,70,'EcnMarkedPackets'),\n  (1,71,'EtherInPkts64Octets'),\n  (1,72,'EtherInPkts65To127Octets'),\n  (1,73,'EtherInPkts128To255Octets'),\n  (1,74,'EtherInPkts256To511Octets'),\n  (1,75,'EtherInPkts512To1023Octets'),\n  (1,76,'EtherInPkts1024To1518Octets'),\n  (1,77,'EtherInPkts1519To2047Octets'),\n  (1,78,'EtherInPkts2048To4095Octets'),\n  (1,79,'EtherInPkts4096To9216Octets'),\n  (1,80,'EtherInPkts9217To16383Octets'),\n  (1,81,'EtherOutPkts64Octets'),\n  (1,82,'EtherOutPkts65To127Octets'),\n  (1,83,'EtherOutPkts128To255Octets'),\n  (1,84,'EtherOutPkts256To511Octets'),\n  (1,85,'EtherOutPkts512To1023Octets'),\n  (1,86,'EtherOutPkts1024To1518Octets'),\n  (1,87,'EtherOutPkts1519To2047Octets'),\n  (1,88,'EtherOutPkts2048To4095Octets'),\n  (1,89,'EtherOutPkts4096To9216Octets'),\n  (1,90,'EtherOutPkts9217To16383Octets'),\n  (1,91,'InCurrOccupancyBytes'),\n  (1,92,'InWatermarkBytes'),\n  (1,93,'InSharedCurrOccupancyBytes'),\n  (1,94,'InSharedWatermarkBytes'),\n  (1,95,'OutCurrOccupancyBytes'),\n  (1,96,'OutWatermarkBytes'),\n  (1,97,'OutSharedCurrOccupancyBytes'),\n  (1,98,'OutSharedWatermarkBytes'),\n  (1,99,'InDroppedPkts'),\n  (1,100,'OutDroppedPkts'),\n  (1,101,'PauseRxPkts'),\n  (1,102,'PauseTxPkts'),\n  (1,103,'Pfc0RxPkts'),\n  (1,104,'Pfc0TxPkts'),\n  (1,105,'Pfc1RxPkts'),\n  (1,106,'Pfc1TxPkts'),\n  (1,107,'Pfc2RxPkts'),\n  (1,108,'Pfc2TxPkts'),\n  (1,109,'Pfc3RxPkts'),\n  (1,110,'Pfc3TxPkts'),\n  (1,111,'Pfc4RxPkts'),\n  (1,112,'Pfc4TxPkts'),\n  (1,113,'Pfc5RxPkts'),\n  (1,114,'Pfc5TxPkts'),\n  (1,115,'Pfc6RxPkts'),\n  (1,116,'Pfc6TxPkts'),\n  (1,117,'Pfc7RxPkts'),\n  (1,118,'Pfc7TxPkts'),\n  (1,119,'Pfc0RxPauseDuration'),\n  (1,120,'Pfc0TxPauseDuration'),\n  (1,121,'Pfc1RxPauseDuration'),\n  (1,122,'Pfc1TxPauseDuration'),\n  (1,123,'Pfc2RxPauseDuration'),\n  (1,124,'Pfc2TxPauseDuration'),\n  (1,125,'Pfc3RxPauseDuration'),\n  (1,126,'Pfc3TxPauseDuration'),\n  (1,127,'Pfc4RxPauseDuration'),\n  (1,128,'Pfc4TxPauseDuration'),\n  (1,129,'Pfc5RxPauseDuration'),\n  (1,130,'Pfc5TxPauseDuration'),\n  (1,131,'Pfc6RxPauseDuration'),\n  (1,132,'Pfc6TxPauseDuration'),\n  (1,133,'Pfc7RxPauseDuration'),\n  (1,134,'Pfc7TxPauseDuration'),\n  (1,135,'Pfc0RxPauseDurationUs'),\n  (1,136,'Pfc0TxPauseDurationUs'),\n  (1,137,'Pfc1RxPauseDurationUs'),\n  (1,138,'Pfc1TxPauseDurationUs'),\n  (1,139,'Pfc2RxPauseDurationUs'),\n  (1,140,'Pfc2TxPauseDurationUs'),\n  (1,141,'Pfc3RxPauseDurationUs'),\n  (1,142,'Pfc3TxPauseDurationUs'),\n  (1,143,'Pfc4RxPauseDurationUs'),\n  (1,144,'Pfc4TxPauseDurationUs'),\n  (1,145,'Pfc5RxPauseDurationUs'),\n  (1,146,'Pfc5TxPauseDurationUs'),\n  (1,147,'Pfc6RxPauseDurationUs'),\n  (1,148,'Pfc6TxPauseDurationUs'),\n  (1,149,'Pfc7RxPauseDurationUs'),\n  (1,150,'Pfc7TxPauseDurationUs'),\n  (1,151,'Pfc0On2OffRxPkts'),\n  (1,152,'Pfc1On2OffRxPkts'),\n  (1,153,'Pfc2On2OffRxPkts'),\n  (1,154,'Pfc3On2OffRxPkts'),\n  (1,155,'Pfc4On2OffRxPkts'),\n  (1,156,'Pfc5On2OffRxPkts'),\n  (1,157,'Pfc6On2OffRxPkts'),\n  (1,158,'Pfc7On2OffRxPkts'),\n  (1,159,'Dot3StatsAlignmentErrors'),\n  (1,160,'Dot3StatsFcsErrors'),\n  (1,161,'Dot3StatsSingleCollisionFrames'),\n  (1,162,'Dot3StatsMultipleCollisionFrames'),\n  (1,163,'Dot3StatsSqeTestErrors'),\n  (1,164,'Dot3StatsDeferredTransmissions'),\n  (1,165,'Dot3StatsLateCollisions'),\n  (1,166,'Dot3StatsExcessiveCollisions'),\n  (1,167,'Dot3StatsInternalMacTransmitErrors'),\n  (1,168,'Dot3StatsCarrierSenseErrors'),\n  (1,169,'Dot3StatsFrameTooLongs'),\n  (1,170,'Dot3StatsInternalMacReceiveErrors'),\n  (1,171,'Dot3StatsSymbolErrors'),\n  (1,172,'Dot3ControlInUnknownOpcodes'),\n  (1,173,'EeeTxEventCount'),\n  (1,174,'EeeRxEventCount'),\n  (1,175,'EeeTxDuration'),\n  (1,176,'EeeRxDuration'),\n  (1,177,'PrbsErrorCount'),\n  (1,178,'IfInFecCorrectableFrames'),\n  (1,179,'IfInFecNotCorrectableFrames'),\n  (1,180,'IfInFecSymbolErrors'),\n  (1,181,'IfInFabricDataUnits'),\n  (1,182,'IfOutFabricDataUnits'),\n  (1,183,'IfInFecCodewordErrorsS0'),\n  (1,184,'IfInFecCodewordErrorsS1'),\n  (1,185,'IfInFecCodewordErrorsS2'),\n  (1,186,'IfInFecCodewordErrorsS3'),\n  (1,187,'IfInFecCodewordErrorsS4'),\n  (1,188,'IfInFecCodewordErrorsS5'),\n  (1,189,'IfInFecCodewordErrorsS6'),\n  (1,190,'IfInFecCodewordErrorsS7'),\n  (1,191,'IfInFecCodewordErrorsS8'),\n  (1,192,'IfInFecCodewordErrorsS9'),\n  (1,193,'IfInFecCodewordErrorsS10'),\n  (1,194,'IfInFecCodewordErrorsS11'),\n  (1,195,'IfInFecCodewordErrorsS12'),\n  (1,196,'IfInFecCodewordErrorsS13'),\n  (1,197,'IfInFecCodewordErrorsS14'),\n  (1,198,'IfInFecCodewordErrorsS15'),\n  (1,199,'IfInFecCodewordErrorsS16'),\n  (1,200,'IfInFecCorrectedBits'),\n  (1,201,'TrimPackets'),\n  (1,202,'DroppedTrimPackets'),\n  (1,203,'TxTrimPackets'),\n  -- Type 21: Queue (47 entries)\n  (21,0,'Packets'),\n  (21,1,'Bytes'),\n  (21,2,'DroppedPackets'),\n  (21,3,'DroppedBytes'),\n  (21,4,'GreenPackets'),\n  (21,5,'GreenBytes'),\n  (21,6,'GreenDroppedPackets'),\n  (21,7,'GreenDroppedBytes'),\n  (21,8,'YellowPackets'),\n  (21,9,'YellowBytes'),\n  (21,10,'YellowDroppedPackets'),\n  (21,11,'YellowDroppedBytes'),\n  (21,12,'RedPackets'),\n  (21,13,'RedBytes'),\n  (21,14,'RedDroppedPackets'),\n  (21,15,'RedDroppedBytes'),\n  (21,16,'GreenWredDroppedPackets'),\n  (21,17,'GreenWredDroppedBytes'),\n  (21,18,'YellowWredDroppedPackets'),\n  (21,19,'YellowWredDroppedBytes'),\n  (21,20,'RedWredDroppedPackets'),\n  (21,21,'RedWredDroppedBytes'),\n  (21,22,'WredDroppedPackets'),\n  (21,23,'WredDroppedBytes'),\n  (21,24,'CurrOccupancyBytes'),\n  (21,25,'WatermarkBytes'),\n  (21,26,'SharedCurrOccupancyBytes'),\n  (21,27,'SharedWatermarkBytes'),\n  (21,28,'GreenWredEcnMarkedPackets'),\n  (21,29,'GreenWredEcnMarkedBytes'),\n  (21,30,'YellowWredEcnMarkedPackets'),\n  (21,31,'YellowWredEcnMarkedBytes'),\n  (21,32,'RedWredEcnMarkedPackets'),\n  (21,33,'RedWredEcnMarkedBytes'),\n  (21,34,'WredEcnMarkedPackets'),\n  (21,35,'WredEcnMarkedBytes'),\n  (21,36,'CurrOccupancyLevel'),\n  (21,37,'WatermarkLevel'),\n  (21,38,'CreditWdDeletedPackets'),\n  (21,39,'DelayWatermarkNs'),\n  (21,40,'TrimPackets'),\n  (21,41,'CurrOccupancyCells'),\n  (21,42,'WatermarkCells'),\n  (21,43,'SharedCurrOccupancyCells'),\n  (21,44,'SharedWatermarkCells'),\n  (21,45,'DroppedTrimPackets'),\n  (21,46,'TxTrimPackets'),\n  -- Type 24: BufferPool (25 entries)\n  (24,0,'CurrOccupancyBytes'),\n  (24,1,'WatermarkBytes'),\n  (24,2,'DroppedPackets'),\n  (24,3,'GreenWredDroppedPackets'),\n  (24,4,'GreenWredDroppedBytes'),\n  (24,5,'YellowWredDroppedPackets'),\n  (24,6,'YellowWredDroppedBytes'),\n  (24,7,'RedWredDroppedPackets'),\n  (24,8,'RedWredDroppedBytes'),\n  (24,9,'WredDroppedPackets'),\n  (24,10,'WredDroppedBytes'),\n  (24,11,'GreenWredEcnMarkedPackets'),\n  (24,12,'GreenWredEcnMarkedBytes'),\n  (24,13,'YellowWredEcnMarkedPackets'),\n  (24,14,'YellowWredEcnMarkedBytes'),\n  (24,15,'RedWredEcnMarkedPackets'),\n  (24,16,'RedWredEcnMarkedBytes'),\n  (24,17,'WredEcnMarkedPackets'),\n  (24,18,'WredEcnMarkedBytes'),\n  (24,19,'XoffRoomCurrOccupancyBytes'),\n  (24,20,'XoffRoomWatermarkBytes'),\n  (24,21,'XoffRoomCurrOccupancyCells'),\n  (24,22,'XoffRoomWatermarkCells'),\n  (24,23,'CurrOccupancyCells'),\n  (24,24,'WatermarkCells'),\n  -- Type 26: IngressPriorityGroup (15 entries)\n  (26,0,'Packets'),\n  (26,1,'Bytes'),\n  (26,2,'CurrOccupancyBytes'),\n  (26,3,'WatermarkBytes'),\n  (26,4,'SharedCurrOccupancyBytes'),\n  (26,5,'SharedWatermarkBytes'),\n  (26,6,'XoffRoomCurrOccupancyBytes'),\n  (26,7,'XoffRoomWatermarkBytes'),\n  (26,8,'DroppedPackets'),\n  (26,9,'CurrOccupancyCells'),\n  (26,10,'WatermarkCells'),\n  (26,11,'SharedCurrOccupancyCells'),\n  (26,12,'SharedWatermarkCells'),\n  (26,13,'XoffRoomCurrOccupancyCells'),\n  (26,14,'XoffRoomWatermarkCells')),\ntype_names(type_id, type_name) AS (VALUES\n  (1,'Port'),(21,'Queue'),(24,'BufPool'),(26,'IngressPG')\n),\ngrouped AS (\n  SELECT (m.timestamp_ns / p.bucket) * p.bucket / 1000000000 AS time,\n         AVG(m.value_int) AS value,\n         json_extract(m.dp_attrs, '$.object_name') AS obj,\n         CAST(json_extract(m.dp_attrs, '$.sai_type_id') AS INTEGER) AS tid,\n         CAST(json_extract(m.dp_attrs, '$.sai_stat_id') AS INTEGER) AS sid\n  FROM metric_data_points m, params p\n  WHERE m.timestamp_ns BETWEEN p.t_start AND p.t_end\n    AND json_extract(m.dp_attrs, '$.object_name') IN (${object_name:sqlstring})\n    AND json_extract(m.dp_attrs, '$.sai_type_id') IN (${sai_type_id:sqlstring})\n    AND json_extract(m.dp_attrs, '$.sai_stat_id') IN (${sai_stat_id:sqlstring})\n  GROUP BY (m.timestamp_ns / p.bucket), obj, tid, sid\n  ORDER BY time\n)\nSELECT g.time, g.value,\n       g.obj || '_' ||\n       COALESCE(tn.type_name, 'T' || g.tid) || '_' ||\n       COALESCE(sn.stat_name, 'stat' || g.sid) AS series\nFROM grouped g\nLEFT JOIN type_names tn ON g.tid = tn.type_id\nLEFT JOIN stat_names sn ON g.tid = sn.type_id AND g.sid = sn.stat_id",
+          "queryType": "table",
+          "rawQueryText": "WITH bounds AS (\n  SELECT\n    COALESCE(CAST(strftime('%s', NULLIF('${ts_start}','')) AS INTEGER) * 1000000000, (SELECT MIN(timestamp_ns) FROM metric_data_points)) AS t_start,\n    COALESCE(CAST(strftime('%s', NULLIF('${ts_end}','')) AS INTEGER) * 1000000000, (SELECT MAX(timestamp_ns) FROM metric_data_points)) AS t_end\n),\nparams AS (\n  SELECT t_start, t_end,\n    CASE WHEN ${max_points} > 0 THEN MAX(1, (t_end - t_start) / ${max_points}) ELSE 1 END AS bucket\n  FROM bounds\n),\nstat_names(type_id, stat_id, stat_name) AS (VALUES\n  -- Type 1: Port (204 entries)\n  (1,0,'IfInOctets'),\n  (1,1,'IfInUcastPkts'),\n  (1,2,'IfInNonUcastPkts'),\n  (1,3,'IfInDiscards'),\n  (1,4,'IfInErrors'),\n  (1,5,'IfInUnknownProtos'),\n  (1,6,'IfInBroadcastPkts'),\n  (1,7,'IfInMulticastPkts'),\n  (1,8,'IfInVlanDiscards'),\n  (1,9,'IfOutOctets'),\n  (1,10,'IfOutUcastPkts'),\n  (1,11,'IfOutNonUcastPkts'),\n  (1,12,'IfOutDiscards'),\n  (1,13,'IfOutErrors'),\n  (1,14,'IfOutQlen'),\n  (1,15,'IfOutBroadcastPkts'),\n  (1,16,'IfOutMulticastPkts'),\n  (1,17,'EtherStatsDropEvents'),\n  (1,18,'EtherStatsMulticastPkts'),\n  (1,19,'EtherStatsBroadcastPkts'),\n  (1,20,'EtherStatsUndersizePkts'),\n  (1,21,'EtherStatsFragments'),\n  (1,22,'EtherStatsPkts64Octets'),\n  (1,23,'EtherStatsPkts65To127Octets'),\n  (1,24,'EtherStatsPkts128To255Octets'),\n  (1,25,'EtherStatsPkts256To511Octets'),\n  (1,26,'EtherStatsPkts512To1023Octets'),\n  (1,27,'EtherStatsPkts1024To1518Octets'),\n  (1,28,'EtherStatsPkts1519To2047Octets'),\n  (1,29,'EtherStatsPkts2048To4095Octets'),\n  (1,30,'EtherStatsPkts4096To9216Octets'),\n  (1,31,'EtherStatsPkts9217To16383Octets'),\n  (1,32,'EtherStatsOversizePkts'),\n  (1,33,'EtherRxOversizePkts'),\n  (1,34,'EtherTxOversizePkts'),\n  (1,35,'EtherStatsJabbers'),\n  (1,36,'EtherStatsOctets'),\n  (1,37,'EtherStatsPkts'),\n  (1,38,'EtherStatsCollisions'),\n  (1,39,'EtherStatsCrcAlignErrors'),\n  (1,40,'EtherStatsTxNoErrors'),\n  (1,41,'EtherStatsRxNoErrors'),\n  (1,42,'IpInReceives'),\n  (1,43,'IpInOctets'),\n  (1,44,'IpInUcastPkts'),\n  (1,45,'IpInNonUcastPkts'),\n  (1,46,'IpInDiscards'),\n  (1,47,'IpOutOctets'),\n  (1,48,'IpOutUcastPkts'),\n  (1,49,'IpOutNonUcastPkts'),\n  (1,50,'IpOutDiscards'),\n  (1,51,'Ipv6InReceives'),\n  (1,52,'Ipv6InOctets'),\n  (1,53,'Ipv6InUcastPkts'),\n  (1,54,'Ipv6InNonUcastPkts'),\n  (1,55,'Ipv6InMcastPkts'),\n  (1,56,'Ipv6InDiscards'),\n  (1,57,'Ipv6OutOctets'),\n  (1,58,'Ipv6OutUcastPkts'),\n  (1,59,'Ipv6OutNonUcastPkts'),\n  (1,60,'Ipv6OutMcastPkts'),\n  (1,61,'Ipv6OutDiscards'),\n  (1,62,'GreenWredDroppedPackets'),\n  (1,63,'GreenWredDroppedBytes'),\n  (1,64,'YellowWredDroppedPackets'),\n  (1,65,'YellowWredDroppedBytes'),\n  (1,66,'RedWredDroppedPackets'),\n  (1,67,'RedWredDroppedBytes'),\n  (1,68,'WredDroppedPackets'),\n  (1,69,'WredDroppedBytes'),\n  (1,70,'EcnMarkedPackets'),\n  (1,71,'EtherInPkts64Octets'),\n  (1,72,'EtherInPkts65To127Octets'),\n  (1,73,'EtherInPkts128To255Octets'),\n  (1,74,'EtherInPkts256To511Octets'),\n  (1,75,'EtherInPkts512To1023Octets'),\n  (1,76,'EtherInPkts1024To1518Octets'),\n  (1,77,'EtherInPkts1519To2047Octets'),\n  (1,78,'EtherInPkts2048To4095Octets'),\n  (1,79,'EtherInPkts4096To9216Octets'),\n  (1,80,'EtherInPkts9217To16383Octets'),\n  (1,81,'EtherOutPkts64Octets'),\n  (1,82,'EtherOutPkts65To127Octets'),\n  (1,83,'EtherOutPkts128To255Octets'),\n  (1,84,'EtherOutPkts256To511Octets'),\n  (1,85,'EtherOutPkts512To1023Octets'),\n  (1,86,'EtherOutPkts1024To1518Octets'),\n  (1,87,'EtherOutPkts1519To2047Octets'),\n  (1,88,'EtherOutPkts2048To4095Octets'),\n  (1,89,'EtherOutPkts4096To9216Octets'),\n  (1,90,'EtherOutPkts9217To16383Octets'),\n  (1,91,'InCurrOccupancyBytes'),\n  (1,92,'InWatermarkBytes'),\n  (1,93,'InSharedCurrOccupancyBytes'),\n  (1,94,'InSharedWatermarkBytes'),\n  (1,95,'OutCurrOccupancyBytes'),\n  (1,96,'OutWatermarkBytes'),\n  (1,97,'OutSharedCurrOccupancyBytes'),\n  (1,98,'OutSharedWatermarkBytes'),\n  (1,99,'InDroppedPkts'),\n  (1,100,'OutDroppedPkts'),\n  (1,101,'PauseRxPkts'),\n  (1,102,'PauseTxPkts'),\n  (1,103,'Pfc0RxPkts'),\n  (1,104,'Pfc0TxPkts'),\n  (1,105,'Pfc1RxPkts'),\n  (1,106,'Pfc1TxPkts'),\n  (1,107,'Pfc2RxPkts'),\n  (1,108,'Pfc2TxPkts'),\n  (1,109,'Pfc3RxPkts'),\n  (1,110,'Pfc3TxPkts'),\n  (1,111,'Pfc4RxPkts'),\n  (1,112,'Pfc4TxPkts'),\n  (1,113,'Pfc5RxPkts'),\n  (1,114,'Pfc5TxPkts'),\n  (1,115,'Pfc6RxPkts'),\n  (1,116,'Pfc6TxPkts'),\n  (1,117,'Pfc7RxPkts'),\n  (1,118,'Pfc7TxPkts'),\n  (1,119,'Pfc0RxPauseDuration'),\n  (1,120,'Pfc0TxPauseDuration'),\n  (1,121,'Pfc1RxPauseDuration'),\n  (1,122,'Pfc1TxPauseDuration'),\n  (1,123,'Pfc2RxPauseDuration'),\n  (1,124,'Pfc2TxPauseDuration'),\n  (1,125,'Pfc3RxPauseDuration'),\n  (1,126,'Pfc3TxPauseDuration'),\n  (1,127,'Pfc4RxPauseDuration'),\n  (1,128,'Pfc4TxPauseDuration'),\n  (1,129,'Pfc5RxPauseDuration'),\n  (1,130,'Pfc5TxPauseDuration'),\n  (1,131,'Pfc6RxPauseDuration'),\n  (1,132,'Pfc6TxPauseDuration'),\n  (1,133,'Pfc7RxPauseDuration'),\n  (1,134,'Pfc7TxPauseDuration'),\n  (1,135,'Pfc0RxPauseDurationUs'),\n  (1,136,'Pfc0TxPauseDurationUs'),\n  (1,137,'Pfc1RxPauseDurationUs'),\n  (1,138,'Pfc1TxPauseDurationUs'),\n  (1,139,'Pfc2RxPauseDurationUs'),\n  (1,140,'Pfc2TxPauseDurationUs'),\n  (1,141,'Pfc3RxPauseDurationUs'),\n  (1,142,'Pfc3TxPauseDurationUs'),\n  (1,143,'Pfc4RxPauseDurationUs'),\n  (1,144,'Pfc4TxPauseDurationUs'),\n  (1,145,'Pfc5RxPauseDurationUs'),\n  (1,146,'Pfc5TxPauseDurationUs'),\n  (1,147,'Pfc6RxPauseDurationUs'),\n  (1,148,'Pfc6TxPauseDurationUs'),\n  (1,149,'Pfc7RxPauseDurationUs'),\n  (1,150,'Pfc7TxPauseDurationUs'),\n  (1,151,'Pfc0On2OffRxPkts'),\n  (1,152,'Pfc1On2OffRxPkts'),\n  (1,153,'Pfc2On2OffRxPkts'),\n  (1,154,'Pfc3On2OffRxPkts'),\n  (1,155,'Pfc4On2OffRxPkts'),\n  (1,156,'Pfc5On2OffRxPkts'),\n  (1,157,'Pfc6On2OffRxPkts'),\n  (1,158,'Pfc7On2OffRxPkts'),\n  (1,159,'Dot3StatsAlignmentErrors'),\n  (1,160,'Dot3StatsFcsErrors'),\n  (1,161,'Dot3StatsSingleCollisionFrames'),\n  (1,162,'Dot3StatsMultipleCollisionFrames'),\n  (1,163,'Dot3StatsSqeTestErrors'),\n  (1,164,'Dot3StatsDeferredTransmissions'),\n  (1,165,'Dot3StatsLateCollisions'),\n  (1,166,'Dot3StatsExcessiveCollisions'),\n  (1,167,'Dot3StatsInternalMacTransmitErrors'),\n  (1,168,'Dot3StatsCarrierSenseErrors'),\n  (1,169,'Dot3StatsFrameTooLongs'),\n  (1,170,'Dot3StatsInternalMacReceiveErrors'),\n  (1,171,'Dot3StatsSymbolErrors'),\n  (1,172,'Dot3ControlInUnknownOpcodes'),\n  (1,173,'EeeTxEventCount'),\n  (1,174,'EeeRxEventCount'),\n  (1,175,'EeeTxDuration'),\n  (1,176,'EeeRxDuration'),\n  (1,177,'PrbsErrorCount'),\n  (1,178,'IfInFecCorrectableFrames'),\n  (1,179,'IfInFecNotCorrectableFrames'),\n  (1,180,'IfInFecSymbolErrors'),\n  (1,181,'IfInFabricDataUnits'),\n  (1,182,'IfOutFabricDataUnits'),\n  (1,183,'IfInFecCodewordErrorsS0'),\n  (1,184,'IfInFecCodewordErrorsS1'),\n  (1,185,'IfInFecCodewordErrorsS2'),\n  (1,186,'IfInFecCodewordErrorsS3'),\n  (1,187,'IfInFecCodewordErrorsS4'),\n  (1,188,'IfInFecCodewordErrorsS5'),\n  (1,189,'IfInFecCodewordErrorsS6'),\n  (1,190,'IfInFecCodewordErrorsS7'),\n  (1,191,'IfInFecCodewordErrorsS8'),\n  (1,192,'IfInFecCodewordErrorsS9'),\n  (1,193,'IfInFecCodewordErrorsS10'),\n  (1,194,'IfInFecCodewordErrorsS11'),\n  (1,195,'IfInFecCodewordErrorsS12'),\n  (1,196,'IfInFecCodewordErrorsS13'),\n  (1,197,'IfInFecCodewordErrorsS14'),\n  (1,198,'IfInFecCodewordErrorsS15'),\n  (1,199,'IfInFecCodewordErrorsS16'),\n  (1,200,'IfInFecCorrectedBits'),\n  (1,201,'TrimPackets'),\n  (1,202,'DroppedTrimPackets'),\n  (1,203,'TxTrimPackets'),\n  -- Type 21: Queue (47 entries)\n  (21,0,'Packets'),\n  (21,1,'Bytes'),\n  (21,2,'DroppedPackets'),\n  (21,3,'DroppedBytes'),\n  (21,4,'GreenPackets'),\n  (21,5,'GreenBytes'),\n  (21,6,'GreenDroppedPackets'),\n  (21,7,'GreenDroppedBytes'),\n  (21,8,'YellowPackets'),\n  (21,9,'YellowBytes'),\n  (21,10,'YellowDroppedPackets'),\n  (21,11,'YellowDroppedBytes'),\n  (21,12,'RedPackets'),\n  (21,13,'RedBytes'),\n  (21,14,'RedDroppedPackets'),\n  (21,15,'RedDroppedBytes'),\n  (21,16,'GreenWredDroppedPackets'),\n  (21,17,'GreenWredDroppedBytes'),\n  (21,18,'YellowWredDroppedPackets'),\n  (21,19,'YellowWredDroppedBytes'),\n  (21,20,'RedWredDroppedPackets'),\n  (21,21,'RedWredDroppedBytes'),\n  (21,22,'WredDroppedPackets'),\n  (21,23,'WredDroppedBytes'),\n  (21,24,'CurrOccupancyBytes'),\n  (21,25,'WatermarkBytes'),\n  (21,26,'SharedCurrOccupancyBytes'),\n  (21,27,'SharedWatermarkBytes'),\n  (21,28,'GreenWredEcnMarkedPackets'),\n  (21,29,'GreenWredEcnMarkedBytes'),\n  (21,30,'YellowWredEcnMarkedPackets'),\n  (21,31,'YellowWredEcnMarkedBytes'),\n  (21,32,'RedWredEcnMarkedPackets'),\n  (21,33,'RedWredEcnMarkedBytes'),\n  (21,34,'WredEcnMarkedPackets'),\n  (21,35,'WredEcnMarkedBytes'),\n  (21,36,'CurrOccupancyLevel'),\n  (21,37,'WatermarkLevel'),\n  (21,38,'CreditWdDeletedPackets'),\n  (21,39,'DelayWatermarkNs'),\n  (21,40,'TrimPackets'),\n  (21,41,'CurrOccupancyCells'),\n  (21,42,'WatermarkCells'),\n  (21,43,'SharedCurrOccupancyCells'),\n  (21,44,'SharedWatermarkCells'),\n  (21,45,'DroppedTrimPackets'),\n  (21,46,'TxTrimPackets'),\n  -- Type 24: BufferPool (25 entries)\n  (24,0,'CurrOccupancyBytes'),\n  (24,1,'WatermarkBytes'),\n  (24,2,'DroppedPackets'),\n  (24,3,'GreenWredDroppedPackets'),\n  (24,4,'GreenWredDroppedBytes'),\n  (24,5,'YellowWredDroppedPackets'),\n  (24,6,'YellowWredDroppedBytes'),\n  (24,7,'RedWredDroppedPackets'),\n  (24,8,'RedWredDroppedBytes'),\n  (24,9,'WredDroppedPackets'),\n  (24,10,'WredDroppedBytes'),\n  (24,11,'GreenWredEcnMarkedPackets'),\n  (24,12,'GreenWredEcnMarkedBytes'),\n  (24,13,'YellowWredEcnMarkedPackets'),\n  (24,14,'YellowWredEcnMarkedBytes'),\n  (24,15,'RedWredEcnMarkedPackets'),\n  (24,16,'RedWredEcnMarkedBytes'),\n  (24,17,'WredEcnMarkedPackets'),\n  (24,18,'WredEcnMarkedBytes'),\n  (24,19,'XoffRoomCurrOccupancyBytes'),\n  (24,20,'XoffRoomWatermarkBytes'),\n  (24,21,'XoffRoomCurrOccupancyCells'),\n  (24,22,'XoffRoomWatermarkCells'),\n  (24,23,'CurrOccupancyCells'),\n  (24,24,'WatermarkCells'),\n  -- Type 26: IngressPriorityGroup (15 entries)\n  (26,0,'Packets'),\n  (26,1,'Bytes'),\n  (26,2,'CurrOccupancyBytes'),\n  (26,3,'WatermarkBytes'),\n  (26,4,'SharedCurrOccupancyBytes'),\n  (26,5,'SharedWatermarkBytes'),\n  (26,6,'XoffRoomCurrOccupancyBytes'),\n  (26,7,'XoffRoomWatermarkBytes'),\n  (26,8,'DroppedPackets'),\n  (26,9,'CurrOccupancyCells'),\n  (26,10,'WatermarkCells'),\n  (26,11,'SharedCurrOccupancyCells'),\n  (26,12,'SharedWatermarkCells'),\n  (26,13,'XoffRoomCurrOccupancyCells'),\n  (26,14,'XoffRoomWatermarkCells')),\ntype_names(type_id, type_name) AS (VALUES\n  (1,'Port'),(21,'Queue'),(24,'BufPool'),(26,'IngressPG')\n),\ngrouped AS (\n  SELECT (m.timestamp_ns / p.bucket) * p.bucket / 1000000000 AS time,\n         AVG(m.value_int) AS value,\n         json_extract(m.dp_attrs, '$.object_name') AS obj,\n         CAST(json_extract(m.dp_attrs, '$.sai_type_id') AS INTEGER) AS tid,\n         CAST(json_extract(m.dp_attrs, '$.sai_stat_id') AS INTEGER) AS sid\n  FROM metric_data_points m, params p\n  WHERE m.timestamp_ns BETWEEN p.t_start AND p.t_end\n    AND json_extract(m.dp_attrs, '$.object_name') IN (${object_name:sqlstring})\n    AND json_extract(m.dp_attrs, '$.sai_type_id') IN (${sai_type_id:sqlstring})\n    AND json_extract(m.dp_attrs, '$.sai_stat_id') IN (${sai_stat_id:sqlstring})\n  GROUP BY (m.timestamp_ns / p.bucket), obj, tid, sid\n  ORDER BY time\n)\nSELECT g.time, g.value,\n       g.obj || '_' ||\n       COALESCE(tn.type_name, 'T' || g.tid) || '_' ||\n       COALESCE(sn.stat_name, 'stat' || g.sid) AS series\nFROM grouped g\nLEFT JOIN type_names tn ON g.tid = tn.type_id\nLEFT JOIN stat_names sn ON g.tid = sn.type_id AND g.sid = sn.stat_id",
+          "refId": "A",
+          "timeColumns": [
+            "time"
+          ]
+        }
+      ],
+      "title": "SAI Counters",
+      "transformations": [
+        {
+          "id": "partitionByValues",
+          "options": {
+            "fields": [
+              "series"
+            ],
+            "keepFields": false
+          }
+        },
+        {
+          "id": "renameByRegex",
+          "options": {
+            "regex": "value (.*)",
+            "renamePattern": "$1"
+          }
+        }
+      ],
+      "type": "timeseries"
+    }
+  ],
+  "schemaVersion": 39,
+  "tags": [
+    "otel_dumper",
+    "sai"
+  ],
+  "templating": {
+    "list": [
+      {
+        "current": {
+          "selected": false,
+          "text": "",
+          "value": ""
+        },
+        "description": "Start time (e.g. 2026-04-05 15:30:00), empty = all data",
+        "label": "Start Time",
+        "name": "ts_start",
+        "options": [
+          {
+            "selected": true,
+            "text": "",
+            "value": ""
+          }
+        ],
+        "query": "",
+        "type": "textbox"
+      },
+      {
+        "current": {
+          "selected": false,
+          "text": "",
+          "value": ""
+        },
+        "description": "End time (e.g. 2026-04-05 22:59:00), empty = all data",
+        "label": "End Time",
+        "name": "ts_end",
+        "options": [
+          {
+            "selected": true,
+            "text": "",
+            "value": ""
+          }
+        ],
+        "query": "",
+        "type": "textbox"
+      },
+      {
+        "current": {
+          "selected": true,
+          "text": "2000",
+          "value": "2000"
+        },
+        "description": "Max data points (0 = all, may be slow for large datasets)",
+        "label": "Max Points",
+        "name": "max_points",
+        "options": [
+          {
+            "selected": false,
+            "text": "0 (all)",
+            "value": "0"
+          },
+          {
+            "selected": false,
+            "text": "1000",
+            "value": "1000"
+          },
+          {
+            "selected": true,
+            "text": "2000",
+            "value": "2000"
+          },
+          {
+            "selected": false,
+            "text": "5000",
+            "value": "5000"
+          },
+          {
+            "selected": false,
+            "text": "10000",
+            "value": "10000"
+          },
+          {
+            "selected": false,
+            "text": "50000",
+            "value": "50000"
+          }
+        ],
+        "query": "0 (all),1000,2000,5000,10000,50000",
+        "type": "custom"
+      },
+      {
+        "allValue": "",
+        "current": {
+          "selected": true,
+          "text": [
+            "All"
+          ],
+          "value": [
+            "$__all"
+          ]
+        },
+        "datasource": {
+          "type": "frser-sqlite-datasource",
+          "uid": "cfi7w8649fegwb"
+        },
+        "definition": "",
+        "includeAll": true,
+        "label": "Object Name",
+        "multi": true,
+        "name": "object_name",
+        "query": "SELECT DISTINCT json_extract(dp_attrs, '$.object_name') AS __text FROM metric_data_points ORDER BY __text",
+        "refresh": 1,
+        "type": "query"
+      },
+      {
+        "allValue": "",
+        "current": {
+          "selected": true,
+          "text": [
+            "All"
+          ],
+          "value": [
+            "$__all"
+          ]
+        },
+        "datasource": {
+          "type": "frser-sqlite-datasource",
+          "uid": "cfi7w8649fegwb"
+        },
+        "definition": "",
+        "includeAll": true,
+        "label": "SAI Type",
+        "multi": true,
+        "name": "sai_type_id",
+        "query": "SELECT json_extract(dp_attrs, '$.sai_type_id') AS __value,\n       CASE CAST(json_extract(dp_attrs, '$.sai_type_id') AS INTEGER)\n         WHEN 1 THEN 'Port'\n         WHEN 21 THEN 'Queue'\n         WHEN 24 THEN 'BufferPool'\n         WHEN 26 THEN 'IngressPriorityGroup'\n         ELSE 'Type' || json_extract(dp_attrs, '$.sai_type_id')\n       END AS __text\nFROM metric_data_points\nGROUP BY __value\nORDER BY CAST(__value AS INTEGER)",
+        "refresh": 1,
+        "type": "query"
+      },
+      {
+        "allValue": "",
+        "current": {
+          "selected": true,
+          "text": [
+            "All"
+          ],
+          "value": [
+            "$__all"
+          ]
+        },
+        "datasource": {
+          "type": "frser-sqlite-datasource",
+          "uid": "cfi7w8649fegwb"
+        },
+        "definition": "",
+        "includeAll": true,
+        "label": "SAI Stat",
+        "multi": true,
+        "name": "sai_stat_id",
+        "query": "WITH sn(type_id, stat_id, stat_name) AS (VALUES\n  -- Type 1: Port (204 entries)\n  (1,0,'IfInOctets'),\n  (1,1,'IfInUcastPkts'),\n  (1,2,'IfInNonUcastPkts'),\n  (1,3,'IfInDiscards'),\n  (1,4,'IfInErrors'),\n  (1,5,'IfInUnknownProtos'),\n  (1,6,'IfInBroadcastPkts'),\n  (1,7,'IfInMulticastPkts'),\n  (1,8,'IfInVlanDiscards'),\n  (1,9,'IfOutOctets'),\n  (1,10,'IfOutUcastPkts'),\n  (1,11,'IfOutNonUcastPkts'),\n  (1,12,'IfOutDiscards'),\n  (1,13,'IfOutErrors'),\n  (1,14,'IfOutQlen'),\n  (1,15,'IfOutBroadcastPkts'),\n  (1,16,'IfOutMulticastPkts'),\n  (1,17,'EtherStatsDropEvents'),\n  (1,18,'EtherStatsMulticastPkts'),\n  (1,19,'EtherStatsBroadcastPkts'),\n  (1,20,'EtherStatsUndersizePkts'),\n  (1,21,'EtherStatsFragments'),\n  (1,22,'EtherStatsPkts64Octets'),\n  (1,23,'EtherStatsPkts65To127Octets'),\n  (1,24,'EtherStatsPkts128To255Octets'),\n  (1,25,'EtherStatsPkts256To511Octets'),\n  (1,26,'EtherStatsPkts512To1023Octets'),\n  (1,27,'EtherStatsPkts1024To1518Octets'),\n  (1,28,'EtherStatsPkts1519To2047Octets'),\n  (1,29,'EtherStatsPkts2048To4095Octets'),\n  (1,30,'EtherStatsPkts4096To9216Octets'),\n  (1,31,'EtherStatsPkts9217To16383Octets'),\n  (1,32,'EtherStatsOversizePkts'),\n  (1,33,'EtherRxOversizePkts'),\n  (1,34,'EtherTxOversizePkts'),\n  (1,35,'EtherStatsJabbers'),\n  (1,36,'EtherStatsOctets'),\n  (1,37,'EtherStatsPkts'),\n  (1,38,'EtherStatsCollisions'),\n  (1,39,'EtherStatsCrcAlignErrors'),\n  (1,40,'EtherStatsTxNoErrors'),\n  (1,41,'EtherStatsRxNoErrors'),\n  (1,42,'IpInReceives'),\n  (1,43,'IpInOctets'),\n  (1,44,'IpInUcastPkts'),\n  (1,45,'IpInNonUcastPkts'),\n  (1,46,'IpInDiscards'),\n  (1,47,'IpOutOctets'),\n  (1,48,'IpOutUcastPkts'),\n  (1,49,'IpOutNonUcastPkts'),\n  (1,50,'IpOutDiscards'),\n  (1,51,'Ipv6InReceives'),\n  (1,52,'Ipv6InOctets'),\n  (1,53,'Ipv6InUcastPkts'),\n  (1,54,'Ipv6InNonUcastPkts'),\n  (1,55,'Ipv6InMcastPkts'),\n  (1,56,'Ipv6InDiscards'),\n  (1,57,'Ipv6OutOctets'),\n  (1,58,'Ipv6OutUcastPkts'),\n  (1,59,'Ipv6OutNonUcastPkts'),\n  (1,60,'Ipv6OutMcastPkts'),\n  (1,61,'Ipv6OutDiscards'),\n  (1,62,'GreenWredDroppedPackets'),\n  (1,63,'GreenWredDroppedBytes'),\n  (1,64,'YellowWredDroppedPackets'),\n  (1,65,'YellowWredDroppedBytes'),\n  (1,66,'RedWredDroppedPackets'),\n  (1,67,'RedWredDroppedBytes'),\n  (1,68,'WredDroppedPackets'),\n  (1,69,'WredDroppedBytes'),\n  (1,70,'EcnMarkedPackets'),\n  (1,71,'EtherInPkts64Octets'),\n  (1,72,'EtherInPkts65To127Octets'),\n  (1,73,'EtherInPkts128To255Octets'),\n  (1,74,'EtherInPkts256To511Octets'),\n  (1,75,'EtherInPkts512To1023Octets'),\n  (1,76,'EtherInPkts1024To1518Octets'),\n  (1,77,'EtherInPkts1519To2047Octets'),\n  (1,78,'EtherInPkts2048To4095Octets'),\n  (1,79,'EtherInPkts4096To9216Octets'),\n  (1,80,'EtherInPkts9217To16383Octets'),\n  (1,81,'EtherOutPkts64Octets'),\n  (1,82,'EtherOutPkts65To127Octets'),\n  (1,83,'EtherOutPkts128To255Octets'),\n  (1,84,'EtherOutPkts256To511Octets'),\n  (1,85,'EtherOutPkts512To1023Octets'),\n  (1,86,'EtherOutPkts1024To1518Octets'),\n  (1,87,'EtherOutPkts1519To2047Octets'),\n  (1,88,'EtherOutPkts2048To4095Octets'),\n  (1,89,'EtherOutPkts4096To9216Octets'),\n  (1,90,'EtherOutPkts9217To16383Octets'),\n  (1,91,'InCurrOccupancyBytes'),\n  (1,92,'InWatermarkBytes'),\n  (1,93,'InSharedCurrOccupancyBytes'),\n  (1,94,'InSharedWatermarkBytes'),\n  (1,95,'OutCurrOccupancyBytes'),\n  (1,96,'OutWatermarkBytes'),\n  (1,97,'OutSharedCurrOccupancyBytes'),\n  (1,98,'OutSharedWatermarkBytes'),\n  (1,99,'InDroppedPkts'),\n  (1,100,'OutDroppedPkts'),\n  (1,101,'PauseRxPkts'),\n  (1,102,'PauseTxPkts'),\n  (1,103,'Pfc0RxPkts'),\n  (1,104,'Pfc0TxPkts'),\n  (1,105,'Pfc1RxPkts'),\n  (1,106,'Pfc1TxPkts'),\n  (1,107,'Pfc2RxPkts'),\n  (1,108,'Pfc2TxPkts'),\n  (1,109,'Pfc3RxPkts'),\n  (1,110,'Pfc3TxPkts'),\n  (1,111,'Pfc4RxPkts'),\n  (1,112,'Pfc4TxPkts'),\n  (1,113,'Pfc5RxPkts'),\n  (1,114,'Pfc5TxPkts'),\n  (1,115,'Pfc6RxPkts'),\n  (1,116,'Pfc6TxPkts'),\n  (1,117,'Pfc7RxPkts'),\n  (1,118,'Pfc7TxPkts'),\n  (1,119,'Pfc0RxPauseDuration'),\n  (1,120,'Pfc0TxPauseDuration'),\n  (1,121,'Pfc1RxPauseDuration'),\n  (1,122,'Pfc1TxPauseDuration'),\n  (1,123,'Pfc2RxPauseDuration'),\n  (1,124,'Pfc2TxPauseDuration'),\n  (1,125,'Pfc3RxPauseDuration'),\n  (1,126,'Pfc3TxPauseDuration'),\n  (1,127,'Pfc4RxPauseDuration'),\n  (1,128,'Pfc4TxPauseDuration'),\n  (1,129,'Pfc5RxPauseDuration'),\n  (1,130,'Pfc5TxPauseDuration'),\n  (1,131,'Pfc6RxPauseDuration'),\n  (1,132,'Pfc6TxPauseDuration'),\n  (1,133,'Pfc7RxPauseDuration'),\n  (1,134,'Pfc7TxPauseDuration'),\n  (1,135,'Pfc0RxPauseDurationUs'),\n  (1,136,'Pfc0TxPauseDurationUs'),\n  (1,137,'Pfc1RxPauseDurationUs'),\n  (1,138,'Pfc1TxPauseDurationUs'),\n  (1,139,'Pfc2RxPauseDurationUs'),\n  (1,140,'Pfc2TxPauseDurationUs'),\n  (1,141,'Pfc3RxPauseDurationUs'),\n  (1,142,'Pfc3TxPauseDurationUs'),\n  (1,143,'Pfc4RxPauseDurationUs'),\n  (1,144,'Pfc4TxPauseDurationUs'),\n  (1,145,'Pfc5RxPauseDurationUs'),\n  (1,146,'Pfc5TxPauseDurationUs'),\n  (1,147,'Pfc6RxPauseDurationUs'),\n  (1,148,'Pfc6TxPauseDurationUs'),\n  (1,149,'Pfc7RxPauseDurationUs'),\n  (1,150,'Pfc7TxPauseDurationUs'),\n  (1,151,'Pfc0On2OffRxPkts'),\n  (1,152,'Pfc1On2OffRxPkts'),\n  (1,153,'Pfc2On2OffRxPkts'),\n  (1,154,'Pfc3On2OffRxPkts'),\n  (1,155,'Pfc4On2OffRxPkts'),\n  (1,156,'Pfc5On2OffRxPkts'),\n  (1,157,'Pfc6On2OffRxPkts'),\n  (1,158,'Pfc7On2OffRxPkts'),\n  (1,159,'Dot3StatsAlignmentErrors'),\n  (1,160,'Dot3StatsFcsErrors'),\n  (1,161,'Dot3StatsSingleCollisionFrames'),\n  (1,162,'Dot3StatsMultipleCollisionFrames'),\n  (1,163,'Dot3StatsSqeTestErrors'),\n  (1,164,'Dot3StatsDeferredTransmissions'),\n  (1,165,'Dot3StatsLateCollisions'),\n  (1,166,'Dot3StatsExcessiveCollisions'),\n  (1,167,'Dot3StatsInternalMacTransmitErrors'),\n  (1,168,'Dot3StatsCarrierSenseErrors'),\n  (1,169,'Dot3StatsFrameTooLongs'),\n  (1,170,'Dot3StatsInternalMacReceiveErrors'),\n  (1,171,'Dot3StatsSymbolErrors'),\n  (1,172,'Dot3ControlInUnknownOpcodes'),\n  (1,173,'EeeTxEventCount'),\n  (1,174,'EeeRxEventCount'),\n  (1,175,'EeeTxDuration'),\n  (1,176,'EeeRxDuration'),\n  (1,177,'PrbsErrorCount'),\n  (1,178,'IfInFecCorrectableFrames'),\n  (1,179,'IfInFecNotCorrectableFrames'),\n  (1,180,'IfInFecSymbolErrors'),\n  (1,181,'IfInFabricDataUnits'),\n  (1,182,'IfOutFabricDataUnits'),\n  (1,183,'IfInFecCodewordErrorsS0'),\n  (1,184,'IfInFecCodewordErrorsS1'),\n  (1,185,'IfInFecCodewordErrorsS2'),\n  (1,186,'IfInFecCodewordErrorsS3'),\n  (1,187,'IfInFecCodewordErrorsS4'),\n  (1,188,'IfInFecCodewordErrorsS5'),\n  (1,189,'IfInFecCodewordErrorsS6'),\n  (1,190,'IfInFecCodewordErrorsS7'),\n  (1,191,'IfInFecCodewordErrorsS8'),\n  (1,192,'IfInFecCodewordErrorsS9'),\n  (1,193,'IfInFecCodewordErrorsS10'),\n  (1,194,'IfInFecCodewordErrorsS11'),\n  (1,195,'IfInFecCodewordErrorsS12'),\n  (1,196,'IfInFecCodewordErrorsS13'),\n  (1,197,'IfInFecCodewordErrorsS14'),\n  (1,198,'IfInFecCodewordErrorsS15'),\n  (1,199,'IfInFecCodewordErrorsS16'),\n  (1,200,'IfInFecCorrectedBits'),\n  (1,201,'TrimPackets'),\n  (1,202,'DroppedTrimPackets'),\n  (1,203,'TxTrimPackets'),\n  -- Type 21: Queue (47 entries)\n  (21,0,'Packets'),\n  (21,1,'Bytes'),\n  (21,2,'DroppedPackets'),\n  (21,3,'DroppedBytes'),\n  (21,4,'GreenPackets'),\n  (21,5,'GreenBytes'),\n  (21,6,'GreenDroppedPackets'),\n  (21,7,'GreenDroppedBytes'),\n  (21,8,'YellowPackets'),\n  (21,9,'YellowBytes'),\n  (21,10,'YellowDroppedPackets'),\n  (21,11,'YellowDroppedBytes'),\n  (21,12,'RedPackets'),\n  (21,13,'RedBytes'),\n  (21,14,'RedDroppedPackets'),\n  (21,15,'RedDroppedBytes'),\n  (21,16,'GreenWredDroppedPackets'),\n  (21,17,'GreenWredDroppedBytes'),\n  (21,18,'YellowWredDroppedPackets'),\n  (21,19,'YellowWredDroppedBytes'),\n  (21,20,'RedWredDroppedPackets'),\n  (21,21,'RedWredDroppedBytes'),\n  (21,22,'WredDroppedPackets'),\n  (21,23,'WredDroppedBytes'),\n  (21,24,'CurrOccupancyBytes'),\n  (21,25,'WatermarkBytes'),\n  (21,26,'SharedCurrOccupancyBytes'),\n  (21,27,'SharedWatermarkBytes'),\n  (21,28,'GreenWredEcnMarkedPackets'),\n  (21,29,'GreenWredEcnMarkedBytes'),\n  (21,30,'YellowWredEcnMarkedPackets'),\n  (21,31,'YellowWredEcnMarkedBytes'),\n  (21,32,'RedWredEcnMarkedPackets'),\n  (21,33,'RedWredEcnMarkedBytes'),\n  (21,34,'WredEcnMarkedPackets'),\n  (21,35,'WredEcnMarkedBytes'),\n  (21,36,'CurrOccupancyLevel'),\n  (21,37,'WatermarkLevel'),\n  (21,38,'CreditWdDeletedPackets'),\n  (21,39,'DelayWatermarkNs'),\n  (21,40,'TrimPackets'),\n  (21,41,'CurrOccupancyCells'),\n  (21,42,'WatermarkCells'),\n  (21,43,'SharedCurrOccupancyCells'),\n  (21,44,'SharedWatermarkCells'),\n  (21,45,'DroppedTrimPackets'),\n  (21,46,'TxTrimPackets'),\n  -- Type 24: BufferPool (25 entries)\n  (24,0,'CurrOccupancyBytes'),\n  (24,1,'WatermarkBytes'),\n  (24,2,'DroppedPackets'),\n  (24,3,'GreenWredDroppedPackets'),\n  (24,4,'GreenWredDroppedBytes'),\n  (24,5,'YellowWredDroppedPackets'),\n  (24,6,'YellowWredDroppedBytes'),\n  (24,7,'RedWredDroppedPackets'),\n  (24,8,'RedWredDroppedBytes'),\n  (24,9,'WredDroppedPackets'),\n  (24,10,'WredDroppedBytes'),\n  (24,11,'GreenWredEcnMarkedPackets'),\n  (24,12,'GreenWredEcnMarkedBytes'),\n  (24,13,'YellowWredEcnMarkedPackets'),\n  (24,14,'YellowWredEcnMarkedBytes'),\n  (24,15,'RedWredEcnMarkedPackets'),\n  (24,16,'RedWredEcnMarkedBytes'),\n  (24,17,'WredEcnMarkedPackets'),\n  (24,18,'WredEcnMarkedBytes'),\n  (24,19,'XoffRoomCurrOccupancyBytes'),\n  (24,20,'XoffRoomWatermarkBytes'),\n  (24,21,'XoffRoomCurrOccupancyCells'),\n  (24,22,'XoffRoomWatermarkCells'),\n  (24,23,'CurrOccupancyCells'),\n  (24,24,'WatermarkCells'),\n  -- Type 26: IngressPriorityGroup (15 entries)\n  (26,0,'Packets'),\n  (26,1,'Bytes'),\n  (26,2,'CurrOccupancyBytes'),\n  (26,3,'WatermarkBytes'),\n  (26,4,'SharedCurrOccupancyBytes'),\n  (26,5,'SharedWatermarkBytes'),\n  (26,6,'XoffRoomCurrOccupancyBytes'),\n  (26,7,'XoffRoomWatermarkBytes'),\n  (26,8,'DroppedPackets'),\n  (26,9,'CurrOccupancyCells'),\n  (26,10,'WatermarkCells'),\n  (26,11,'SharedCurrOccupancyCells'),\n  (26,12,'SharedWatermarkCells'),\n  (26,13,'XoffRoomCurrOccupancyCells'),\n  (26,14,'XoffRoomWatermarkCells'))\nSELECT CAST(m.stat_id AS TEXT) AS __value,\n       COALESCE(sn.stat_name, 'stat' || m.stat_id) || ' (' || m.stat_id || ')' AS __text\nFROM (SELECT DISTINCT CAST(json_extract(dp_attrs, '$.sai_stat_id') AS INTEGER) AS stat_id,\n             CAST(json_extract(dp_attrs, '$.sai_type_id') AS INTEGER) AS type_id\n      FROM metric_data_points) m\nLEFT JOIN sn ON m.type_id = sn.type_id AND m.stat_id = sn.stat_id\nORDER BY m.stat_id",
+        "refresh": 1,
+        "type": "query"
+      }
+    ]
+  },
+  "time": {
+    "from": "now-24h",
+    "to": "now"
+  },
+  "timepicker": {},
+  "timezone": "",
+  "title": "OTel Dumper - SAI Counters",
+  "uid": null,
+  "version": 0,
+  "weekStart": ""
+}
