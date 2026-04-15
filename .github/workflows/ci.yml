@@ -49,7 +49,7 @@ jobs:
         if: github.event_name == 'push' && github.ref == 'refs/heads/master'
         uses: actions/upload-artifact@v4
         with:
-          name: otel_dumper-x86_64-linux
+          name: otel_dumper-x86_64-musl
           path: target/x86_64-unknown-linux-musl/release/otel_dumper
 
   check-duckdb:
@@ -83,7 +83,7 @@ jobs:
         if: github.event_name == 'push' && github.ref == 'refs/heads/master'
         uses: actions/upload-artifact@v4
         with:
-          name: otel_dumper-x86_64-linux-duckdb
+          name: otel_dumper-x86_64-gnu
           path: target/x86_64-unknown-linux-gnu/release/otel_dumper
 
   release:
@@ -99,21 +99,21 @@ jobs:
       - name: Download musl binary
         uses: actions/download-artifact@v4
         with:
-          name: otel_dumper-x86_64-linux
+          name: otel_dumper-x86_64-musl
           path: ./artifact-musl
 
-      - name: Download DuckDB binary
+      - name: Download gnu binary
         uses: actions/download-artifact@v4
         with:
-          name: otel_dumper-x86_64-linux-duckdb
-          path: ./artifact-duckdb
+          name: otel_dumper-x86_64-gnu
+          path: ./artifact-gnu
 
       - name: Prepare binaries
         run: |
           chmod +x ./artifact-musl/otel_dumper
-          mv ./artifact-musl/otel_dumper ./otel_dumper-x86_64-linux
-          chmod +x ./artifact-duckdb/otel_dumper
-          mv ./artifact-duckdb/otel_dumper ./otel_dumper-x86_64-linux-duckdb
+          mv ./artifact-musl/otel_dumper ./otel_dumper-x86_64-musl
+          chmod +x ./artifact-gnu/otel_dumper
+          mv ./artifact-gnu/otel_dumper ./otel_dumper-x86_64-gnu
 
       - name: Delete old latest release
         run: gh release delete latest --yes --cleanup-tag || true
@@ -132,11 +132,11 @@ jobs:
 
             | Binary | Description |
             |--------|-------------|
-            | `otel_dumper-x86_64-linux` | Static musl binary (SQLite only, runs anywhere) |
-            | `otel_dumper-x86_64-linux-duckdb` | GNU binary with DuckDB + SQLite support |
+            | `otel_dumper-x86_64-musl` | Static musl binary (SQLite only, runs anywhere) |
+            | `otel_dumper-x86_64-gnu` | GNU binary with DuckDB + SQLite support |
           draft: false
           prerelease: false
           make_latest: true
           files: |
-            otel_dumper-x86_64-linux
-            otel_dumper-x86_64-linux-duckdb
+            otel_dumper-x86_64-musl
+            otel_dumper-x86_64-gnu
