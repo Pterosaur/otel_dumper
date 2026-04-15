@@ -1,6 +1,6 @@
 # otel_dumper
 
-一个 OpenTelemetry Collector 模拟器，接收 OTLP Metrics 数据并落盘到 SQLite 数据库和/或 JSONL 文件，用于离线分析和 Grafana 可视化。
+一个 OpenTelemetry Collector 模拟器，接收 OTLP Metrics 数据并落盘到 SQLite 或 DuckDB 数据库和/或 JSONL 文件，用于离线分析和 Grafana 可视化。
 
 [English](README.md)
 
@@ -9,10 +9,11 @@
 ## 功能特性
 
 - **双协议支持**: gRPC (`:4317`) 和 HTTP (`:4318`) OTLP 端点
-- **高吞吐**: 针对 ~10万 data points/秒 设计，批量写入 SQLite
-- **双输出格式**: SQLite 用于 Grafana 查询 + 可选 JSONL 用于本地直观阅读
+- **高吞吐**: 针对 ~10万 data points/秒 设计，批量写入
+- **双存储后端**: SQLite（行存储，便携）或 DuckDB（列存储，压缩，文件体积缩小约 100 倍）
+- **双输出格式**: 数据库用于 Grafana 查询 + 可选 JSONL 用于本地直观阅读
 - **Prometheus 导出**: 可选 `/metrics` 端点，通过 SSH 隧道实现远程实时 Grafana 监控
-- **Grafana 就绪**: 使用 [SQLite 数据源插件](https://grafana.com/grafana/plugins/frser-sqlite-datasource/) 或内置 Prometheus 数据源
+- **Grafana 就绪**: 使用 [SQLite 数据源插件](https://grafana.com/grafana/plugins/frser-sqlite-datasource/) 或 [DuckDB 数据源插件](https://grafana.com/grafana/plugins/grafana-duckdb-datasource/) 或内置 Prometheus 数据源
 - **单文件静态二进制**: 使用 musl 全静态链接，直接 `scp` 到任意 Linux 机器运行
 - **全指标类型**: Gauge、Sum (Counter)、Histogram、Exponential Histogram、Summary
 
@@ -29,7 +30,7 @@ Client (OTLP)
                              │
                         Batch Writer (后台任务)
                              │
-                        SQLite (WAL 模式, 批量事务)
+                        SQLite / DuckDB
 ```
 
 ## 快速开始
@@ -61,6 +62,12 @@ ls target/x86_64-unknown-linux-musl/release/otel_dumper
 # 默认：仅 SQLite 输出
 ./otel_dumper
 
+# 使用 DuckDB 后端（根据文件扩展名自动检测）
+./otel_dumper --db-path ./metrics.duckdb
+
+# 显式指定存储后端
+./otel_dumper --db-path ./data.db --db-format duckdb
+
 # 同时输出 JSONL，方便本地阅读
 ./otel_dumper --jsonl-path ./metrics.jsonl
 
@@ -81,7 +88,9 @@ ls target/x86_64-unknown-linux-musl/release/otel_dumper
 |------|--------|------|
 | `--grpc-port` | `4317` | gRPC OTLP 服务端口 |
 | `--http-port` | `4318` | HTTP OTLP 服务端口 |
-| `--db-path` | `metrics.db` | SQLite 数据库文件路径 |
+| `--db-path` | `metrics.db` | 数据库文件路径（`.duckdb`/`.ddb` 自动选择 DuckDB） |
+| `--db-format` | *（自动）* | 存储后端：`sqlite` 或 `duckdb`（根据扩展名自动检测） |
+| `--index-attrs` | *（无）* | dp_attrs 中需要索引的 JSON key（逗号分隔，仅 SQLite） |
 | `--jsonl-path` | *（无）* | JSONL 输出文件路径（可选，用于本地直观阅读） |
 | `--prom-port` | *（无）* | Prometheus 导出端口（可选，暴露 `/metrics` 端点） |
 | `--prom-history` | *（无）* | Prometheus 历史保留窗口（如 "30 mins"、"24 hours"） |
@@ -211,6 +220,30 @@ ORDER BY count DESC
 ```bash
 sqlite3 metrics.db "CREATE INDEX IF NOT EXISTS idx_name_ts ON metric_data_points(metric_name, timestamp_ns);"
 ```
+
+## DuckDB 后端
+
+DuckDB 是列式分析数据库，在指标存储方面有显著优势：
+
+| | SQLite | DuckDB |
+|---|---|---|
+| **文件大小** | ~117 MB (46万行) | **~1.5 MB** (缩小 77 倍) |
+| **查询速度** | 225ms (需要索引) | **24ms** (无需索引) |
+| **时间精度** | 秒级（插件限制） | **纳秒级**（原生支持） |
+
+### 何时使用 DuckDB
+
+- 需要**小文件**方便在机器间拷贝
+- 需要 Grafana 中的**纳秒时间精度**
+- 主要做**分析查询**（聚合、过滤、GROUP BY）
+
+### DuckDB + Grafana 配置
+
+1. 安装 [DuckDB 数据源插件](https://grafana.com/grafana/plugins/grafana-duckdb-datasource/)：
+   ```bash
+   grafana-cli plugins install grafana-duckdb-datasource
+   ```
+2. 在 Grafana 中添加 DuckDB 数据源，指向 `.duckdb` 文件。
 
 ## 数据库表结构
 

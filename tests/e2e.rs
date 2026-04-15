@@ -1,7 +1,7 @@
 //! End-to-end test: start full server stack, send OTLP metrics via both
 //! gRPC (over network) and HTTP (via tower), verify data lands correctly in SQLite and JSONL.
 
-use otel_dumper::{grpc_server, http_server, jsonl_writer, storage, writer};
+use otel_dumper::{grpc_server, http_server, jsonl_writer, storage_backend, writer};
 
 use opentelemetry_proto::tonic::{
     collector::metrics::v1::{
@@ -208,7 +208,7 @@ async fn test_e2e_full_pipeline() {
     let jsonl_path = dir.path().join("e2e_test.jsonl");
 
     // --- Start the full server stack ---
-    let storage = Arc::new(storage::Storage::new(&db_path).unwrap());
+    let storage = Arc::new(storage_backend::StorageBackend::sqlite(&db_path).unwrap());
     let jsonl = Arc::new(jsonl_writer::JsonlWriter::new(&jsonl_path).unwrap());
     let (tx, rx) = mpsc::channel(1000);
 

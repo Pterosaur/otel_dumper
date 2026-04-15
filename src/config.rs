@@ -57,4 +57,9 @@ pub struct Config {
     /// Example: --index-attrs object_name,sai_type_id,sai_stat_id
     #[arg(long, value_delimiter = ',')]
     pub index_attrs: Vec<String>,
+
+    /// Storage backend format: sqlite or duckdb.
+    /// Default: auto-detect from db_path extension (.duckdb/.ddb → DuckDB, otherwise SQLite)
+    #[arg(long, value_parser = ["sqlite", "duckdb"])]
+    pub db_format: Option<String>,
 }

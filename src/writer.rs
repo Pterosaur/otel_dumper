@@ -1,7 +1,7 @@
 use crate::converter::FlatDataPoint;
 use crate::jsonl_writer::JsonlWriter;
 use crate::prom_exporter::MetricsStore;
-use crate::storage::Storage;
+use crate::storage_backend::StorageBackend;
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::{mpsc, watch};
@@ -11,7 +11,7 @@ use tokio::task::JoinHandle;
 /// Send `true` on shutdown_trigger to tell the writer to stop.
 pub fn start_writer(
     rx: mpsc::Receiver<Vec<FlatDataPoint>>,
-    storage: Arc<Storage>,
+    storage: Arc<StorageBackend>,
     jsonl: Option<Arc<JsonlWriter>>,
     prom_store: Option<Arc<MetricsStore>>,
     batch_size: usize,
@@ -35,7 +35,7 @@ pub fn start_writer(
 #[allow(clippy::too_many_arguments)]
 async fn run_writer(
     mut rx: mpsc::Receiver<Vec<FlatDataPoint>>,
-    storage: Arc<Storage>,
+    storage: Arc<StorageBackend>,
     jsonl: Option<Arc<JsonlWriter>>,
     prom_store: Option<Arc<MetricsStore>>,
     batch_size: usize,
@@ -126,7 +126,7 @@ async fn run_writer(
 }
 
 async fn flush(
-    storage: &Arc<Storage>,
+    storage: &Arc<StorageBackend>,
     jsonl: &Option<Arc<JsonlWriter>>,
     prom_store: &Option<Arc<MetricsStore>>,
     buffer: &mut Vec<FlatDataPoint>,
@@ -148,7 +148,7 @@ async fn flush(
                 tracing::error!("JSONL write error: {e}");
             }
         }
-        Ok::<_, rusqlite::Error>(())
+        Ok::<_, crate::storage_backend::StorageError>(())
     })
     .await;
 
@@ -158,7 +158,7 @@ async fn flush(
             count
         }
         Ok(Err(e)) => {
-            tracing::error!("SQLite write error: {e}");
+            tracing::error!("Storage write error: {e}");
             0
         }
         Err(e) => {
@@ -172,6 +172,7 @@ async fn flush(
 mod tests {
     use super::*;
     use crate::converter::FlatDataPoint;
+    use crate::storage_backend::StorageBackend;
 
     fn make_points(n: usize) -> Vec<FlatDataPoint> {
         (0..n)
@@ -203,7 +204,7 @@ mod tests {
     #[tokio::test]
     async fn test_writer_flushes_on_channel_close() {
         let dir = tempfile::tempdir().unwrap();
-        let storage = Arc::new(Storage::new(&dir.path().join("test.db")).unwrap());
+        let storage = Arc::new(StorageBackend::sqlite(&dir.path().join("test.db")).unwrap());
         let (tx, rx) = mpsc::channel(100);
 
         let (handle, _shutdown) = start_writer(
@@ -227,7 +228,7 @@ mod tests {
     #[tokio::test]
     async fn test_writer_flushes_on_batch_size() {
         let dir = tempfile::tempdir().unwrap();
-        let storage = Arc::new(Storage::new(&dir.path().join("test.db")).unwrap());
+        let storage = Arc::new(StorageBackend::sqlite(&dir.path().join("test.db")).unwrap());
         let (tx, rx) = mpsc::channel(100);
 
         // batch_size=50, so sending 60 points should trigger a flush
@@ -255,7 +256,7 @@ mod tests {
     #[tokio::test]
     async fn test_writer_max_rows() {
         let dir = tempfile::tempdir().unwrap();
-        let storage = Arc::new(Storage::new(&dir.path().join("test.db")).unwrap());
+        let storage = Arc::new(StorageBackend::sqlite(&dir.path().join("test.db")).unwrap());
         let (tx, rx) = mpsc::channel(100);
 
         let (handle, _shutdown) = start_writer(
@@ -280,7 +281,7 @@ mod tests {
     #[tokio::test]
     async fn test_writer_timer_flush() {
         let dir = tempfile::tempdir().unwrap();
-        let storage = Arc::new(Storage::new(&dir.path().join("test.db")).unwrap());
+        let storage = Arc::new(StorageBackend::sqlite(&dir.path().join("test.db")).unwrap());
         let (tx, rx) = mpsc::channel(100);
 
         // Large batch_size but short flush interval

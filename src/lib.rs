@@ -1,9 +1,11 @@
 pub mod config;
 pub mod converter;
+pub mod duckdb_storage;
 pub mod grpc_server;
 pub mod http_server;
 pub mod jsonl_writer;
 pub mod prom_exporter;
 pub mod sqlite_api;
 pub mod storage;
+pub mod storage_backend;
 pub mod writer;

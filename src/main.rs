@@ -1,7 +1,7 @@
 use clap::Parser;
 use otel_dumper::config::Config;
 use otel_dumper::{
-    grpc_server, http_server, jsonl_writer, prom_exporter, sqlite_api, storage, writer,
+    grpc_server, http_server, jsonl_writer, prom_exporter, sqlite_api, storage_backend, writer,
 };
 use std::sync::Arc;
 use std::time::Duration;
@@ -31,9 +31,22 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             .unwrap_or_default(),
     );
 
-    let storage = Arc::new(
-        storage::Storage::new(&config.db_path).expect("Failed to initialize SQLite database"),
-    );
+    let storage = Arc::new(match config.db_format.as_deref() {
+        Some("duckdb") => storage_backend::StorageBackend::duckdb(&config.db_path),
+        Some("sqlite") => storage_backend::StorageBackend::sqlite(&config.db_path),
+        _ => storage_backend::StorageBackend::auto(&config.db_path),
+    }
+    .expect("Failed to initialize database"));
+
+    tracing::info!("Storage backend: {}", storage.backend_name());
+
+    // Warn if --sqlite-port is used with DuckDB
+    if config.sqlite_port.is_some() && storage.backend_name() == "DuckDB" {
+        tracing::warn!(
+            "--sqlite-port is only supported with SQLite backend; \
+             the SQLite query API will not be started"
+        );
+    }
 
     let jsonl = config.jsonl_path.as_ref().map(|path| {
         Arc::new(jsonl_writer::JsonlWriter::new(path).expect("Failed to open JSONL output file"))
@@ -91,16 +104,19 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             }
         })
     });
-    let sqlite_handle = config.sqlite_port.map(|port| {
+    let sqlite_handle = config.sqlite_port.and_then(|port| {
+        if storage.backend_name() == "DuckDB" {
+            return None;
+        }
         let qs = Arc::new(
             sqlite_api::QueryServer::new(&config.db_path)
                 .expect("Failed to open read-only SQLite connection for query API"),
         );
-        tokio::spawn(async move {
+        Some(tokio::spawn(async move {
             if let Err(e) = sqlite_api::run(qs, port).await {
                 tracing::error!("SQLite query API failed: {e}");
             }
-        })
+        }))
     });
 
     // Wait for Ctrl+C, or both servers dying (e.g. port conflict)

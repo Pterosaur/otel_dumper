@@ -1,6 +1,6 @@
 # otel_dumper
 
-An OpenTelemetry Collector simulator that receives OTLP Metrics data and dumps it into a SQLite database and/or JSONL file for offline analysis and Grafana visualization.
+An OpenTelemetry Collector simulator that receives OTLP Metrics data and dumps it into a SQLite or DuckDB database and/or JSONL file for offline analysis and Grafana visualization.
 
 [中文文档](README_CN.md)
 
@@ -9,10 +9,11 @@ An OpenTelemetry Collector simulator that receives OTLP Metrics data and dumps i
 ## Features
 
 - **Dual protocol support**: gRPC (`:4317`) and HTTP (`:4318`) OTLP endpoints
-- **High throughput**: Designed for ~100K data points/sec with batched SQLite writes
-- **Dual output format**: SQLite for Grafana queries + optional JSONL for human-readable local inspection
+- **High throughput**: Designed for ~100K data points/sec with batched writes
+- **Dual storage backend**: SQLite (row-based, portable) or DuckDB (columnar, compressed, ~100x smaller)
+- **Dual output format**: Database for Grafana queries + optional JSONL for human-readable local inspection
 - **Prometheus exporter**: Optional `/metrics` endpoint for real-time Grafana monitoring via SSH tunnel
-- **Grafana ready**: Use the [SQLite datasource plugin](https://grafana.com/grafana/plugins/frser-sqlite-datasource/) or built-in Prometheus datasource
+- **Grafana ready**: Use the [SQLite datasource plugin](https://grafana.com/grafana/plugins/frser-sqlite-datasource/) or [DuckDB datasource plugin](https://grafana.com/grafana/plugins/grafana-duckdb-datasource/) or built-in Prometheus datasource
 - **Single static binary**: Statically linked with musl, just `scp` to any Linux machine and run
 - **All metric types**: Gauge, Sum (Counter), Histogram, Exponential Histogram, Summary
 
@@ -29,7 +30,7 @@ Client (OTLP)
                              │
                         Batch Writer (background task)
                              │
-                        SQLite (WAL mode, batch transactions)
+                        SQLite / DuckDB
 ```
 
 ## Quick Start
@@ -61,6 +62,12 @@ ls target/x86_64-unknown-linux-musl/release/otel_dumper
 # Default: SQLite only
 ./otel_dumper
 
+# Use DuckDB backend (auto-detected from file extension)
+./otel_dumper --db-path ./metrics.duckdb
+
+# Explicitly specify storage backend
+./otel_dumper --db-path ./data.db --db-format duckdb
+
 # With JSONL output for local inspection
 ./otel_dumper --jsonl-path ./metrics.jsonl
 
@@ -77,6 +84,11 @@ ls target/x86_64-unknown-linux-musl/release/otel_dumper
   --batch-size 50000 \
   --flush-interval-ms 500 \
   --max-rows 100000000
+
+# DuckDB with JSON attribute indexing for fast Grafana queries
+./otel_dumper \
+  --db-path ./metrics.duckdb \
+  --index-attrs object_name,sai_type_id,sai_stat_id
 ```
 
 ### CLI Options
@@ -85,7 +97,9 @@ ls target/x86_64-unknown-linux-musl/release/otel_dumper
 |--------|---------|-------------|
 | `--grpc-port` | `4317` | gRPC OTLP server port |
 | `--http-port` | `4318` | HTTP OTLP server port |
-| `--db-path` | `metrics.db` | SQLite database file path |
+| `--db-path` | `metrics.db` | Database file path (`.duckdb`/`.ddb` auto-selects DuckDB) |
+| `--db-format` | *(auto)* | Storage backend: `sqlite` or `duckdb` (auto-detected from extension) |
+| `--index-attrs` | *(none)* | JSON keys in dp_attrs to index (comma-separated, SQLite only) |
 | `--jsonl-path` | *(none)* | JSONL output file path (optional, for local inspection) |
 | `--prom-port` | *(none)* | Prometheus exporter port (optional, exposes `/metrics`) |
 | `--prom-history` | *(none)* | Prometheus history retention (e.g. "30 mins", "24 hours") |
@@ -221,6 +235,46 @@ The program automatically creates analysis indexes on shutdown. If you need to c
 
 ```bash
 sqlite3 metrics.db "CREATE INDEX IF NOT EXISTS idx_name_ts ON metric_data_points(metric_name, timestamp_ns);"
+```
+
+## DuckDB Backend
+
+DuckDB is a columnar analytical database that provides significant advantages for metrics storage:
+
+| | SQLite | DuckDB |
+|---|---|---|
+| **File size** | ~117 MB (460K rows) | **~1.5 MB** (77x smaller) |
+| **Query speed** | 225ms (with indexes) | **24ms** (no indexes needed) |
+| **Time precision** | Seconds (plugin limit) | **Nanoseconds** (native) |
+
+### When to use DuckDB
+
+- You need **small file sizes** for easy copying between machines
+- You need **nanosecond time precision** in Grafana
+- You're doing **analytical queries** (aggregations, filters, GROUP BY)
+
+### DuckDB + Grafana Setup
+
+1. Install the [DuckDB datasource plugin](https://grafana.com/grafana/plugins/grafana-duckdb-datasource/):
+   ```bash
+   grafana-cli plugins install grafana-duckdb-datasource
+   ```
+2. Add a new DuckDB datasource in Grafana, point it to your `.duckdb` file.
+
+### DuckDB Query Examples
+
+```sql
+-- Time series (nanosecond precision)
+SELECT timestamp_ns / 1000000 AS time, value_int AS value
+FROM metric_data_points
+WHERE metric_name = 'cpu.usage'
+ORDER BY timestamp_ns
+
+-- Filter by JSON attributes (fast without indexes)
+SELECT timestamp_ns / 1000000 AS time, value_int AS value
+FROM metric_data_points
+WHERE json_extract_string(dp_attrs, '$.object_name') = 'Ethernet0|0'
+ORDER BY timestamp_ns
 ```
 
 ## SQLite Schema
