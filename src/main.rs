@@ -31,21 +31,23 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             .unwrap_or_default(),
     );
 
-    let storage = Arc::new(match config.db_format.as_deref() {
-        #[cfg(feature = "duckdb")]
-        Some("duckdb") => storage_backend::StorageBackend::duckdb(&config.db_path),
-        #[cfg(not(feature = "duckdb"))]
-        Some("duckdb") => {
-            eprintln!(
-                "Error: --db-format duckdb requires the 'duckdb' feature. \
+    let storage = Arc::new(
+        match config.db_format.as_deref() {
+            #[cfg(feature = "duckdb")]
+            Some("duckdb") => storage_backend::StorageBackend::duckdb(&config.db_path),
+            #[cfg(not(feature = "duckdb"))]
+            Some("duckdb") => {
+                eprintln!(
+                    "Error: --db-format duckdb requires the 'duckdb' feature. \
                  Rebuild with: cargo build --features duckdb"
-            );
-            std::process::exit(1);
+                );
+                std::process::exit(1);
+            }
+            Some("sqlite") => storage_backend::StorageBackend::sqlite(&config.db_path),
+            _ => storage_backend::StorageBackend::auto(&config.db_path),
         }
-        Some("sqlite") => storage_backend::StorageBackend::sqlite(&config.db_path),
-        _ => storage_backend::StorageBackend::auto(&config.db_path),
-    }
-    .expect("Failed to initialize database"));
+        .expect("Failed to initialize database"),
+    );
 
     tracing::info!("Storage backend: {}", storage.backend_name());
 

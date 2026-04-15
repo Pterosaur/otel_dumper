@@ -205,8 +205,11 @@ mod tests {
         let mut stmt = conn
             .prepare("SELECT hist_count, hist_sum, hist_min, hist_max FROM metric_data_points WHERE metric_name = 'req.duration'")
             .unwrap();
-        let (count, sum, min, max): (i64, f64, f64, f64) =
-            stmt.query_row([], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?))).unwrap();
+        let (count, sum, min, max): (i64, f64, f64, f64) = stmt
+            .query_row([], |row| {
+                Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?))
+            })
+            .unwrap();
         assert_eq!(count, 100);
         assert_eq!(sum, 5000.0);
         assert_eq!(min, 0.5);

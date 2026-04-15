@@ -82,10 +82,7 @@ impl StorageBackend {
         }
     }
 
-    pub fn create_analysis_indexes(
-        &self,
-        dp_attr_keys: &[String],
-    ) -> Result<(), StorageError> {
+    pub fn create_analysis_indexes(&self, dp_attr_keys: &[String]) -> Result<(), StorageError> {
         match self {
             StorageBackend::Sqlite(s) => Ok(s.create_analysis_indexes(dp_attr_keys)?),
             #[cfg(feature = "duckdb")]
