@@ -11,7 +11,7 @@ env:
 
 jobs:
   check:
-    name: Check & Test
+    name: Check & Test (SQLite-only, musl static)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -31,7 +31,7 @@ jobs:
             ~/.cargo/registry
             ~/.cargo/git
             target
-          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+          key: ${{ runner.os }}-cargo-musl-${{ hashFiles('**/Cargo.lock') }}
 
       - name: Build
         run: cargo build --release
@@ -52,9 +52,43 @@ jobs:
           name: otel_dumper-x86_64-linux
           path: target/x86_64-unknown-linux-musl/release/otel_dumper
 
+  check-duckdb:
+    name: Check & Test (DuckDB, gnu)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-gnu-duckdb-${{ hashFiles('**/Cargo.lock') }}
+
+      - name: Build
+        run: cargo build --release --target x86_64-unknown-linux-gnu --features duckdb
+
+      - name: Run tests
+        run: cargo test --target x86_64-unknown-linux-gnu --features duckdb
+
+      - name: Clippy
+        run: cargo clippy --target x86_64-unknown-linux-gnu --features duckdb -- -D warnings
+
+      - name: Upload binary artifact
+        if: github.event_name == 'push' && github.ref == 'refs/heads/master'
+        uses: actions/upload-artifact@v4
+        with:
+          name: otel_dumper-x86_64-linux-duckdb
+          path: target/x86_64-unknown-linux-gnu/release/otel_dumper
+
   release:
     name: Update Latest Release
-    needs: check
+    needs: [check, check-duckdb]
     if: github.event_name == 'push' && github.ref == 'refs/heads/master'
     runs-on: ubuntu-latest
     permissions:
@@ -62,16 +96,24 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Download binary artifact
+      - name: Download musl binary
         uses: actions/download-artifact@v4
         with:
           name: otel_dumper-x86_64-linux
-          path: ./artifact
+          path: ./artifact-musl
 
-      - name: Prepare binary
+      - name: Download DuckDB binary
+        uses: actions/download-artifact@v4
+        with:
+          name: otel_dumper-x86_64-linux-duckdb
+          path: ./artifact-duckdb
+
+      - name: Prepare binaries
         run: |
-          chmod +x ./artifact/otel_dumper
-          mv ./artifact/otel_dumper ./otel_dumper-x86_64-linux
+          chmod +x ./artifact-musl/otel_dumper
+          mv ./artifact-musl/otel_dumper ./otel_dumper-x86_64-linux
+          chmod +x ./artifact-duckdb/otel_dumper
+          mv ./artifact-duckdb/otel_dumper ./otel_dumper-x86_64-linux-duckdb
 
       - name: Delete old latest release
         run: gh release delete latest --yes --cleanup-tag || true
@@ -88,8 +130,13 @@ jobs:
 
             ## Download
 
-            - `otel_dumper-x86_64-linux`: Statically linked binary for x86_64 Linux
+            | Binary | Description |
+            |--------|-------------|
+            | `otel_dumper-x86_64-linux` | Static musl binary (SQLite only, runs anywhere) |
+            | `otel_dumper-x86_64-linux-duckdb` | GNU binary with DuckDB + SQLite support |
           draft: false
           prerelease: false
           make_latest: true
-          files: otel_dumper-x86_64-linux
+          files: |
+            otel_dumper-x86_64-linux
+            otel_dumper-x86_64-linux-duckdb

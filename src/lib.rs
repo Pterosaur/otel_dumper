@@ -1,5 +1,6 @@
 pub mod config;
 pub mod converter;
+#[cfg(feature = "duckdb")]
 pub mod duckdb_storage;
 pub mod grpc_server;
 pub mod http_server;
