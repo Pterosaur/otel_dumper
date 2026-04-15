@@ -95,13 +95,45 @@ impl Storage {
     }
 
     /// Create additional indexes for faster Grafana queries. Call after data collection is done.
-    pub fn create_analysis_indexes(&self) -> rusqlite::Result<()> {
+    ///
+    /// When `dp_attr_keys` is non-empty, expression indexes are built on the
+    /// specified `dp_attrs` JSON keys so that queries using
+    /// `json_extract(dp_attrs, '$.key')` can leverage index lookups instead of
+    /// full-table scans.
+    pub fn create_analysis_indexes(&self, dp_attr_keys: &[String]) -> rusqlite::Result<()> {
         let conn = self.conn.lock().unwrap();
         conn.execute_batch(
             "CREATE INDEX IF NOT EXISTS idx_name_ts ON metric_data_points(metric_name, timestamp_ns);
-             CREATE INDEX IF NOT EXISTS idx_type ON metric_data_points(metric_type);
-             PRAGMA wal_checkpoint(TRUNCATE);",
+             CREATE INDEX IF NOT EXISTS idx_type ON metric_data_points(metric_type);",
         )?;
+
+        if !dp_attr_keys.is_empty() {
+            // Composite index on all specified keys + timestamp for panel queries
+            let exprs: Vec<String> = dp_attr_keys
+                .iter()
+                .map(|k| format!("json_extract(dp_attrs, '$.{k}')"))
+                .collect();
+
+            let composite = format!(
+                "CREATE INDEX IF NOT EXISTS idx_dp_attrs_composite \
+                 ON metric_data_points({}, timestamp_ns);",
+                exprs.join(", ")
+            );
+            conn.execute_batch(&composite)?;
+
+            // Individual indexes on each key for variable/filter queries
+            for key in dp_attr_keys {
+                let idx = format!(
+                    "CREATE INDEX IF NOT EXISTS idx_dp_attr_{key} \
+                     ON metric_data_points(json_extract(dp_attrs, '$.{key}'));"
+                );
+                conn.execute_batch(&idx)?;
+            }
+
+            conn.execute_batch("ANALYZE;")?;
+        }
+
+        conn.execute_batch("PRAGMA wal_checkpoint(TRUNCATE);")?;
         Ok(())
     }
 
@@ -240,9 +272,45 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let db_path = dir.path().join("test.db");
         let storage = Storage::new(&db_path).unwrap();
-        // Should not panic on empty DB
-        storage.create_analysis_indexes().unwrap();
+        // Should not panic on empty DB (no attr keys)
+        storage.create_analysis_indexes(&[]).unwrap();
         // Should be idempotent
-        storage.create_analysis_indexes().unwrap();
+        storage.create_analysis_indexes(&[]).unwrap();
+    }
+
+    #[test]
+    fn test_create_analysis_indexes_with_attr_keys() {
+        let dir = tempfile::tempdir().unwrap();
+        let db_path = dir.path().join("test.db");
+        let storage = Storage::new(&db_path).unwrap();
+
+        let points = vec![FlatDataPoint {
+            timestamp_ns: 1_000_000_000,
+            metric_name: "test_metric".to_string(),
+            metric_type: "gauge",
+            resource_attrs: None,
+            scope_name: None,
+            scope_version: None,
+            dp_attrs: Some(r#"{"host":"node-1","region":"us-west"}"#.to_string()),
+            value_double: Some(42.0),
+            value_int: None,
+            is_monotonic: None,
+            aggregation_temporality: None,
+            hist_count: None,
+            hist_sum: None,
+            hist_min: None,
+            hist_max: None,
+            hist_bounds: None,
+            hist_counts: None,
+            extra_data: None,
+            start_timestamp_ns: None,
+            flags: 0,
+        }];
+        storage.insert_batch(&points).unwrap();
+
+        let keys = vec!["host".to_string(), "region".to_string()];
+        storage.create_analysis_indexes(&keys).unwrap();
+        // Should be idempotent
+        storage.create_analysis_indexes(&keys).unwrap();
     }
 }

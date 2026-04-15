@@ -283,7 +283,7 @@ async fn test_e2e_full_pipeline() {
     writer_handle.await.unwrap();
 
     // Create analysis indexes
-    storage.create_analysis_indexes().unwrap();
+    storage.create_analysis_indexes(&[]).unwrap();
 
     // --- Verify SQLite data ---
     let conn = Connection::open(&db_path).unwrap();

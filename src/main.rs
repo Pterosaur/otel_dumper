@@ -141,7 +141,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // 5. Build analysis indexes
     tracing::info!("Building analysis indexes...");
-    if let Err(e) = storage.create_analysis_indexes() {
+    if !config.index_attrs.is_empty() {
+        tracing::info!("Indexing dp_attrs keys: {:?}", config.index_attrs);
+    }
+    if let Err(e) = storage.create_analysis_indexes(&config.index_attrs) {
         tracing::error!("Failed to create indexes: {e}");
     }
 

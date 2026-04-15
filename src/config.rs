@@ -52,4 +52,9 @@ pub struct Config {
     /// Maximum total rows to write (0 = unlimited)
     #[arg(long, default_value_t = 0)]
     pub max_rows: u64,
+
+    /// JSON keys in dp_attrs to index for faster queries (comma-separated).
+    /// Example: --index-attrs object_name,sai_type_id,sai_stat_id
+    #[arg(long, value_delimiter = ',')]
+    pub index_attrs: Vec<String>,
 }
