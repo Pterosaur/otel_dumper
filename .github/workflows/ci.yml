@@ -53,38 +53,49 @@ jobs:
           path: target/x86_64-unknown-linux-musl/release/otel_dumper
 
   check-duckdb:
-    name: Check & Test (DuckDB, gnu)
+    name: Check & Test (DuckDB, musl static)
     runs-on: ubuntu-latest
+    container:
+      image: rust:1-alpine3.21
     steps:
+      - name: Install build dependencies
+        run: apk add --no-cache musl-dev g++ make git
+
       - uses: actions/checkout@v4
 
-      - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@stable
+      - name: Install clippy
+        run: rustup component add clippy
 
       - name: Cache cargo
         uses: actions/cache@v4
         with:
           path: |
-            ~/.cargo/registry
-            ~/.cargo/git
+            /usr/local/cargo/registry
+            /usr/local/cargo/git
             target
-          key: ${{ runner.os }}-cargo-gnu-duckdb-${{ hashFiles('**/Cargo.lock') }}
+          key: alpine-cargo-duckdb-${{ hashFiles('**/Cargo.lock') }}
 
       - name: Build
-        run: cargo build --release --target x86_64-unknown-linux-gnu --features duckdb
+        run: cargo build --release --features duckdb
 
       - name: Run tests
-        run: cargo test --target x86_64-unknown-linux-gnu --features duckdb
+        run: cargo test --features duckdb
 
       - name: Clippy
-        run: cargo clippy --target x86_64-unknown-linux-gnu --features duckdb -- -D warnings
+        run: cargo clippy --features duckdb -- -D warnings
+
+      - name: Verify static binary
+        run: |
+          file target/x86_64-unknown-linux-musl/release/otel_dumper
+          # Must be statically linked
+          file target/x86_64-unknown-linux-musl/release/otel_dumper | grep -q "statically linked"
 
       - name: Upload binary artifact
         if: github.event_name == 'push' && github.ref == 'refs/heads/master'
         uses: actions/upload-artifact@v4
         with:
-          name: otel_dumper-x86_64-gnu
-          path: target/x86_64-unknown-linux-gnu/release/otel_dumper
+          name: otel_dumper-x86_64-musl-duckdb
+          path: target/x86_64-unknown-linux-musl/release/otel_dumper
 
   release:
     name: Update Latest Release
@@ -102,18 +113,18 @@ jobs:
           name: otel_dumper-x86_64-musl
           path: ./artifact-musl
 
-      - name: Download gnu binary
+      - name: Download musl+duckdb binary
         uses: actions/download-artifact@v4
         with:
-          name: otel_dumper-x86_64-gnu
-          path: ./artifact-gnu
+          name: otel_dumper-x86_64-musl-duckdb
+          path: ./artifact-duckdb
 
       - name: Prepare binaries
         run: |
           chmod +x ./artifact-musl/otel_dumper
           mv ./artifact-musl/otel_dumper ./otel_dumper-x86_64-musl
-          chmod +x ./artifact-gnu/otel_dumper
-          mv ./artifact-gnu/otel_dumper ./otel_dumper-x86_64-gnu
+          chmod +x ./artifact-duckdb/otel_dumper
+          mv ./artifact-duckdb/otel_dumper ./otel_dumper-x86_64-musl-duckdb
 
       - name: Delete old latest release
         run: gh release delete latest --yes --cleanup-tag || true
@@ -133,10 +144,10 @@ jobs:
             | Binary | Description |
             |--------|-------------|
             | `otel_dumper-x86_64-musl` | Static musl binary (SQLite only, runs anywhere) |
-            | `otel_dumper-x86_64-gnu` | GNU binary with DuckDB + SQLite support |
+            | `otel_dumper-x86_64-musl-duckdb` | Static musl binary with DuckDB + SQLite support |
           draft: false
           prerelease: false
           make_latest: true
           files: |
             otel_dumper-x86_64-musl
-            otel_dumper-x86_64-gnu
+            otel_dumper-x86_64-musl-duckdb
