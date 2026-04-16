@@ -94,6 +94,11 @@ impl DuckDbStorage {
             .unwrap();
         stmt.query_row([], |row| row.get(0)).unwrap()
     }
+
+    /// Return the database file path for diagnostics.
+    pub fn is_duckdb(&self) -> bool {
+        true
+    }
 }
 
 #[cfg(test)]
