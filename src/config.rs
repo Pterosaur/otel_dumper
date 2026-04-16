@@ -15,8 +15,8 @@ pub struct Config {
     #[arg(long, default_value_t = 4318)]
     pub http_port: u16,
 
-    /// SQLite database file path
-    #[arg(long, default_value = "metrics.db")]
+    /// Database file path (.db/.sqlite → SQLite, default/other → DuckDB)
+    #[arg(long, default_value = "metrics.duckdb")]
     pub db_path: PathBuf,
 
     /// JSONL output file path (optional, for human-readable local inspection)

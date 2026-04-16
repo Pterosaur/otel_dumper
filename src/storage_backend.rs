@@ -58,11 +58,13 @@ impl StorageBackend {
     }
 
     /// Auto-detect backend from file extension.
-    /// `.duckdb` or `.ddb` → DuckDB (if feature enabled), everything else → SQLite.
+    /// `.duckdb` or `.ddb` → DuckDB, `.db` or `.sqlite` → SQLite.
+    /// When DuckDB feature is enabled, defaults to DuckDB for unrecognized extensions.
     pub fn auto(db_path: &Path) -> Result<Self, StorageError> {
         match db_path.extension().and_then(|e| e.to_str()) {
+            Some("db") | Some("sqlite") | Some("sqlite3") => Self::sqlite(db_path),
             #[cfg(feature = "duckdb")]
-            Some("duckdb") | Some("ddb") => Self::duckdb(db_path),
+            _ => Self::duckdb(db_path),
             #[cfg(not(feature = "duckdb"))]
             Some("duckdb") | Some("ddb") => {
                 panic!(
@@ -70,6 +72,7 @@ impl StorageBackend {
                      Rebuild with: cargo build --features duckdb"
                 );
             }
+            #[cfg(not(feature = "duckdb"))]
             _ => Self::sqlite(db_path),
         }
     }
