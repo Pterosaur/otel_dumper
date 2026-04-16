@@ -17,7 +17,7 @@ jobs:
       image: rust:1-alpine3.21
     steps:
       - name: Install build dependencies
-        run: apk add --no-cache musl-dev g++ make git file
+        run: apk add --no-cache musl-dev g++ make git file tar zstd
 
       - uses: actions/checkout@v4
 
