@@ -31,7 +31,10 @@ jobs:
             ~/.cargo/registry
             ~/.cargo/git
             target
-          key: ${{ runner.os }}-cargo-musl-${{ hashFiles('**/Cargo.lock') }}
+          key: ${{ runner.os }}-cargo-musl-${{ hashFiles('**/Cargo.lock') }}-${{ hashFiles('src/**') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-musl-${{ hashFiles('**/Cargo.lock') }}-
+            ${{ runner.os }}-cargo-musl-
 
       - name: Build
         run: cargo build --release
@@ -59,23 +62,26 @@ jobs:
       image: rust:1-alpine3.21
     steps:
       - name: Install build dependencies
-        run: apk add --no-cache musl-dev g++ make git
+        run: apk add --no-cache musl-dev g++ make git file
 
       - uses: actions/checkout@v4
 
       - name: Install clippy
         run: rustup component add clippy
 
-      - name: Cache cargo
+      - name: Cache cargo registry and target
         uses: actions/cache@v4
         with:
           path: |
             /usr/local/cargo/registry
             /usr/local/cargo/git
             target
-          key: alpine-cargo-duckdb-${{ hashFiles('**/Cargo.lock') }}
+          key: alpine-duckdb-${{ hashFiles('**/Cargo.lock') }}-${{ hashFiles('src/**') }}
+          restore-keys: |
+            alpine-duckdb-${{ hashFiles('**/Cargo.lock') }}-
+            alpine-duckdb-
 
-      - name: Build
+      - name: Build (release)
         run: cargo build --release --features duckdb
 
       - name: Run tests
@@ -86,10 +92,9 @@ jobs:
 
       - name: Verify static binary
         run: |
-          apk add --no-cache file
           file target/x86_64-unknown-linux-musl/release/otel_dumper
-          # Must be statically linked
-          file target/x86_64-unknown-linux-musl/release/otel_dumper | grep -q "statically linked"
+          # Must be statically linked (output may say "statically linked" or "static-pie linked")
+          file target/x86_64-unknown-linux-musl/release/otel_dumper | grep -qE "static"
 
       - name: Upload binary artifact
         if: github.event_name == 'push' && github.ref == 'refs/heads/master'
