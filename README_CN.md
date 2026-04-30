@@ -79,6 +79,8 @@ ls target/x86_64-unknown-linux-musl/release/otel_dumper
   --jsonl-path ./metrics.jsonl \
   --batch-size 50000 \
   --flush-interval-ms 500 \
+  --db-size 5G \
+  --db-time-window 30m \
   --max-rows 100000000
 ```
 
@@ -88,8 +90,10 @@ ls target/x86_64-unknown-linux-musl/release/otel_dumper
 |------|--------|------|
 | `--grpc-port` | `4317` | gRPC OTLP 服务端口 |
 | `--http-port` | `4318` | HTTP OTLP 服务端口 |
-| `--db-path` | `metrics.db` | 数据库文件路径（`.duckdb`/`.ddb` 自动选择 DuckDB） |
+| `--db-path` | `metrics.duckdb` | 数据库文件路径（`.duckdb`/`.ddb` 自动选择 DuckDB） |
 | `--db-format` | *（自动）* | 存储后端：`sqlite` 或 `duckdb`（根据扩展名自动检测） |
+| `--db-size` | `5G` | 近似滚动数据库大小窗口，0 表示不限制；别名：`--size` |
+| `--db-time-window` | `30m` | 近似滚动数据库时间窗口，0 表示不限制；别名：`--time-window` |
 | `--index-attrs` | *（无）* | dp_attrs 中需要索引的 JSON key（逗号分隔，仅 SQLite） |
 | `--jsonl-path` | *（无）* | JSONL 输出文件路径（可选，用于本地直观阅读） |
 | `--prom-port` | *（无）* | Prometheus 导出端口（可选，暴露 `/metrics` 端点） |
@@ -99,6 +103,15 @@ ls target/x86_64-unknown-linux-musl/release/otel_dumper
 | `--flush-interval-ms` | `500` | 定时刷盘间隔（毫秒），即使批次未满也会写入 |
 | `--channel-capacity` | `10000` | 内部通道缓冲大小 |
 | `--max-rows` | `0` | 最大写入行数，0 表示不限制 |
+
+### 数据库滚动窗口
+
+otel_dumper 只保留配置窗口内的最新数据库数据。窗口有两个 gate：
+
+- `--db-time-window`：删除早于“最新写入时间戳减去窗口”的行。
+- `--db-size`：当数据库文件超过限制时，按估算删除一部分最旧数据，并执行 checkpoint/压缩。
+
+两个 gate 都是近似控制，会在批量写入后按间隔触发，避免影响写入热路径。任一 gate 设置为 `0` 表示关闭，例如 `--db-size 0` 或 `--db-time-window 0`。默认值是 `--db-size 5G` 和 `--db-time-window 30m`，也就是数据库文件大致不超过 5 GB，并保留最近 30 分钟的数据。
 
 ## SQLite 查询 API
 

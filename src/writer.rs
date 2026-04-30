@@ -1,6 +1,7 @@
 use crate::converter::FlatDataPoint;
 use crate::jsonl_writer::JsonlWriter;
 use crate::prom_exporter::MetricsStore;
+use crate::retention::RetentionPolicy;
 use crate::storage_backend::StorageBackend;
 use std::sync::Arc;
 use std::time::Duration;
@@ -17,6 +18,7 @@ pub fn start_writer(
     batch_size: usize,
     flush_interval: Duration,
     max_rows: u64,
+    retention_policy: RetentionPolicy,
 ) -> (JoinHandle<()>, watch::Sender<bool>) {
     let (shutdown_tx, shutdown_rx) = watch::channel(false);
     let handle = tokio::spawn(run_writer(
@@ -27,6 +29,7 @@ pub fn start_writer(
         batch_size,
         flush_interval,
         max_rows,
+        retention_policy,
         shutdown_rx,
     ));
     (handle, shutdown_tx)
@@ -41,6 +44,7 @@ async fn run_writer(
     batch_size: usize,
     flush_interval: Duration,
     max_rows: u64,
+    retention_policy: RetentionPolicy,
     mut shutdown_rx: watch::Receiver<bool>,
 ) {
     let mut buffer: Vec<FlatDataPoint> = Vec::with_capacity(batch_size * 2);
@@ -55,6 +59,9 @@ async fn run_writer(
     let mut last_report_rows: u64 = 0;
     let mut last_report_time = tokio::time::Instant::now();
     let mut first_data_received = false;
+    let mut last_retention = tokio::time::Instant::now()
+        .checked_sub(retention_policy.cleanup_interval)
+        .unwrap_or_else(tokio::time::Instant::now);
 
     loop {
         tokio::select! {
@@ -64,6 +71,7 @@ async fn run_writer(
                     if !buffer.is_empty() {
                         total_rows += flush(&storage, &jsonl, &prom_store, &mut buffer).await;
                     }
+                    maybe_apply_retention(&storage, retention_policy, &mut last_retention, true).await;
                     break;
                 }
             }
@@ -79,6 +87,7 @@ async fn run_writer(
                         buffer.extend(points);
                         if buffer.len() >= batch_size {
                             total_rows += flush(&storage, &jsonl, &prom_store, &mut buffer).await;
+                            maybe_apply_retention(&storage, retention_policy, &mut last_retention, false).await;
                             if max_rows > 0 && total_rows >= max_rows {
                                 tracing::info!("Reached max_rows limit ({max_rows}), stopping writer");
                                 break;
@@ -90,6 +99,7 @@ async fn run_writer(
                         if !buffer.is_empty() {
                             total_rows += flush(&storage, &jsonl, &prom_store, &mut buffer).await;
                         }
+                        maybe_apply_retention(&storage, retention_policy, &mut last_retention, true).await;
                         break;
                     }
                 }
@@ -97,6 +107,7 @@ async fn run_writer(
             _ = interval.tick() => {
                 if !buffer.is_empty() {
                     total_rows += flush(&storage, &jsonl, &prom_store, &mut buffer).await;
+                    maybe_apply_retention(&storage, retention_policy, &mut last_retention, false).await;
                     if max_rows > 0 && total_rows >= max_rows {
                         tracing::info!("Reached max_rows limit ({max_rows}), stopping writer");
                         break;
@@ -123,6 +134,37 @@ async fn run_writer(
     }
 
     tracing::info!("Writer finished. Total rows written: {total_rows}");
+}
+
+async fn maybe_apply_retention(
+    storage: &Arc<StorageBackend>,
+    policy: RetentionPolicy,
+    last_retention: &mut tokio::time::Instant,
+    force: bool,
+) {
+    if !policy.is_enabled() {
+        return;
+    }
+    if !force && last_retention.elapsed() < policy.cleanup_interval {
+        return;
+    }
+    *last_retention = tokio::time::Instant::now();
+
+    let storage = storage.clone();
+    match tokio::task::spawn_blocking(move || storage.apply_retention(policy)).await {
+        Ok(Ok(stats)) => {
+            if stats.rows_deleted > 0 {
+                tracing::info!(
+                    "Retention cleanup removed {} rows, db_size={} -> {} bytes",
+                    stats.rows_deleted,
+                    stats.bytes_before,
+                    stats.bytes_after,
+                );
+            }
+        }
+        Ok(Err(e)) => tracing::error!("Retention cleanup error: {e}"),
+        Err(e) => tracing::error!("Retention cleanup task error: {e}"),
+    }
 }
 
 async fn flush(
@@ -172,6 +214,7 @@ async fn flush(
 mod tests {
     use super::*;
     use crate::converter::FlatDataPoint;
+    use crate::retention::RetentionPolicy;
     use crate::storage_backend::StorageBackend;
 
     fn make_points(n: usize) -> Vec<FlatDataPoint> {
@@ -215,6 +258,7 @@ mod tests {
             10_000,
             Duration::from_secs(60),
             0,
+            RetentionPolicy::disabled(),
         );
 
         tx.send(make_points(50)).await.unwrap();
@@ -240,6 +284,7 @@ mod tests {
             50,
             Duration::from_secs(60),
             0,
+            RetentionPolicy::disabled(),
         );
 
         tx.send(make_points(60)).await.unwrap();
@@ -267,6 +312,7 @@ mod tests {
             10,
             Duration::from_secs(60),
             25,
+            RetentionPolicy::disabled(),
         );
 
         tx.send(make_points(15)).await.unwrap();
@@ -293,6 +339,7 @@ mod tests {
             100_000,
             Duration::from_millis(50),
             0,
+            RetentionPolicy::disabled(),
         );
 
         tx.send(make_points(10)).await.unwrap();
@@ -302,5 +349,31 @@ mod tests {
 
         drop(tx);
         handle.await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn test_writer_applies_time_retention() {
+        let dir = tempfile::tempdir().unwrap();
+        let storage = Arc::new(StorageBackend::sqlite(&dir.path().join("test.db")).unwrap());
+        let (tx, rx) = mpsc::channel(100);
+
+        let mut policy = RetentionPolicy::new(0, Duration::from_nanos(10));
+        policy.cleanup_interval = Duration::ZERO;
+        let (handle, _shutdown) = start_writer(
+            rx,
+            storage.clone(),
+            None,
+            None,
+            10,
+            Duration::from_secs(60),
+            0,
+            policy,
+        );
+
+        tx.send(make_points(20)).await.unwrap();
+        drop(tx);
+
+        handle.await.unwrap();
+        assert_eq!(storage.count_rows(), 11);
     }
 }

@@ -1,5 +1,6 @@
 use clap::Parser;
 use std::path::PathBuf;
+use std::time::Duration;
 
 #[derive(Parser, Debug, Clone)]
 #[command(
@@ -53,6 +54,24 @@ pub struct Config {
     #[arg(long, default_value_t = 0)]
     pub max_rows: u64,
 
+    /// Approximate database size window. 0 = unlimited. Examples: 512M, 5G, 1.5GiB.
+    #[arg(
+        long = "db-size",
+        visible_aliases = ["size", "db_size"],
+        default_value = "5G",
+        value_parser = crate::retention::parse_size_bytes,
+    )]
+    pub db_size: u64,
+
+    /// Approximate database time window. 0 = unlimited. Examples: 30m, "30 mins", 2h.
+    #[arg(
+        long = "db-time-window",
+        visible_aliases = ["time-window", "time_window", "db_time_window"],
+        default_value = "30m",
+        value_parser = crate::retention::parse_duration_arg,
+    )]
+    pub db_time_window: Duration,
+
     /// JSON keys in dp_attrs to index for faster queries (comma-separated).
     /// Example: --index-attrs object_name,sai_type_id,sai_stat_id
     #[arg(long, value_delimiter = ',')]
@@ -62,4 +81,27 @@ pub struct Config {
     /// Default: auto-detect from db_path extension (.duckdb/.ddb → DuckDB, otherwise SQLite)
     #[arg(long, value_parser = ["sqlite", "duckdb"])]
     pub db_format: Option<String>,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::retention::{DEFAULT_DB_SIZE_BYTES, DEFAULT_DB_TIME_WINDOW};
+
+    #[test]
+    fn test_default_retention_config() {
+        let config = Config::try_parse_from(["otel_dumper"]).unwrap();
+
+        assert_eq!(config.db_size, DEFAULT_DB_SIZE_BYTES);
+        assert_eq!(config.db_time_window, DEFAULT_DB_TIME_WINDOW);
+    }
+
+    #[test]
+    fn test_retention_aliases_accept_zero() {
+        let config =
+            Config::try_parse_from(["otel_dumper", "--size", "0", "--time_window", "0"]).unwrap();
+
+        assert_eq!(config.db_size, 0);
+        assert_eq!(config.db_time_window, std::time::Duration::ZERO);
+    }
 }

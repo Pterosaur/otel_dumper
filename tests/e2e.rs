@@ -220,6 +220,7 @@ async fn test_e2e_full_pipeline() {
         100,  // small batch for testing
         Duration::from_millis(100),
         0,
+        otel_dumper::retention::RetentionPolicy::disabled(),
     );
 
     // Start gRPC server (network E2E)

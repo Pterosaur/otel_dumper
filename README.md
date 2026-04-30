@@ -83,6 +83,8 @@ ls target/x86_64-unknown-linux-musl/release/otel_dumper
   --prom-port 9090 \
   --batch-size 50000 \
   --flush-interval-ms 500 \
+  --db-size 5G \
+  --db-time-window 30m \
   --max-rows 100000000
 
 # DuckDB with JSON attribute indexing for fast Grafana queries
@@ -97,8 +99,10 @@ ls target/x86_64-unknown-linux-musl/release/otel_dumper
 |--------|---------|-------------|
 | `--grpc-port` | `4317` | gRPC OTLP server port |
 | `--http-port` | `4318` | HTTP OTLP server port |
-| `--db-path` | `metrics.db` | Database file path (`.duckdb`/`.ddb` auto-selects DuckDB) |
+| `--db-path` | `metrics.duckdb` | Database file path (`.duckdb`/`.ddb` auto-selects DuckDB) |
 | `--db-format` | *(auto)* | Storage backend: `sqlite` or `duckdb` (auto-detected from extension) |
+| `--db-size` | `5G` | Approximate rolling database size window, 0=unlimited; alias: `--size` |
+| `--db-time-window` | `30m` | Approximate rolling database time window, 0=unlimited; alias: `--time-window` |
 | `--index-attrs` | *(none)* | JSON keys in dp_attrs to index (comma-separated, SQLite only) |
 | `--jsonl-path` | *(none)* | JSONL output file path (optional, for local inspection) |
 | `--prom-port` | *(none)* | Prometheus exporter port (optional, exposes `/metrics`) |
@@ -108,6 +112,15 @@ ls target/x86_64-unknown-linux-musl/release/otel_dumper
 | `--flush-interval-ms` | `500` | Flush interval even if batch is not full |
 | `--channel-capacity` | `10000` | Internal channel buffer size |
 | `--max-rows` | `0` | Max rows to write, 0=unlimited |
+
+### Rolling Database Window
+
+otel_dumper keeps only the newest data inside the configured database window. The window has two gates:
+
+- `--db-time-window`: deletes rows older than the latest ingested timestamp minus the window.
+- `--db-size`: when the database file grows beyond the limit, deletes an estimated amount of oldest data and compacts/checkpoints the database.
+
+Both gates are approximate and are applied after batch flushes, throttled to avoid slowing the hot write path. Set either gate to `0` to disable it, for example `--db-size 0` or `--db-time-window 0`. Defaults are `--db-size 5G` and `--db-time-window 30m`, so the generated database should stay around 5 GB and the latest 30 minutes of data.
 
 ## SQLite Query API
 

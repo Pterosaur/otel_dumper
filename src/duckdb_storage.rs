@@ -1,10 +1,12 @@
 use crate::converter::FlatDataPoint;
+use crate::retention::{self, RetentionPolicy, RetentionStats};
 use duckdb::{params, Connection};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 
 pub struct DuckDbStorage {
     conn: Mutex<Connection>,
+    db_path: PathBuf,
 }
 
 impl DuckDbStorage {
@@ -39,6 +41,7 @@ impl DuckDbStorage {
 
         Ok(DuckDbStorage {
             conn: Mutex::new(conn),
+            db_path: db_path.to_path_buf(),
         })
     }
 
@@ -83,6 +86,73 @@ impl DuckDbStorage {
         // DuckDB's columnar engine handles analytical queries efficiently
         // without explicit indexes. No-op here.
         Ok(())
+    }
+
+    pub fn apply_retention(&self, policy: RetentionPolicy) -> duckdb::Result<RetentionStats> {
+        if !policy.is_enabled() {
+            return Ok(RetentionStats::default());
+        }
+
+        let conn = self.conn.lock().unwrap();
+        let mut stats = RetentionStats {
+            bytes_before: retention::duckdb_database_size_bytes(&self.db_path),
+            ..RetentionStats::default()
+        };
+
+        if let Some(window_ns) = policy.time_window_ns() {
+            let latest_ts: Option<i64> = conn.query_row(
+                "SELECT MAX(timestamp_ns) FROM metric_data_points",
+                [],
+                |row| row.get(0),
+            )?;
+            if let Some(latest_ts) = latest_ts {
+                let cutoff = latest_ts.saturating_sub(window_ns);
+                let deleted = conn.execute(
+                    "DELETE FROM metric_data_points WHERE timestamp_ns < ?1",
+                    params![cutoff],
+                )?;
+                stats.rows_deleted += deleted as u64;
+            }
+        }
+
+        if let Some(target_bytes) = policy.size_target_bytes() {
+            let current_bytes = retention::duckdb_database_size_bytes(&self.db_path);
+            if current_bytes > policy.max_bytes {
+                let row_count: u64 =
+                    conn.query_row("SELECT COUNT(*) FROM metric_data_points", [], |row| {
+                        row.get::<_, i64>(0)
+                    })? as u64;
+                let rows_to_delete =
+                    retention::rows_to_delete_for_size(row_count, current_bytes, target_bytes);
+                if rows_to_delete > 0 {
+                    let deleted = if rows_to_delete >= row_count {
+                        conn.execute("DELETE FROM metric_data_points", [])?
+                    } else {
+                        let cutoff: i64 = conn.query_row(
+                            "SELECT timestamp_ns
+                             FROM metric_data_points
+                             ORDER BY timestamp_ns
+                             LIMIT 1 OFFSET ?1",
+                            params![rows_to_delete.saturating_sub(1).min(i64::MAX as u64) as i64],
+                            |row| row.get(0),
+                        )?;
+                        conn.execute(
+                            "DELETE FROM metric_data_points WHERE timestamp_ns <= ?1",
+                            params![cutoff],
+                        )?
+                    };
+                    stats.rows_deleted += deleted as u64;
+
+                    // Force a checkpoint so the file-size gate observes pending WAL data.
+                    conn.execute_batch("CHECKPOINT;")?;
+                }
+            }
+        } else if stats.rows_deleted > 0 {
+            conn.execute_batch("CHECKPOINT;")?;
+        }
+
+        stats.bytes_after = retention::duckdb_database_size_bytes(&self.db_path);
+        Ok(stats)
     }
 
     /// Query row count (for testing).
@@ -168,6 +238,46 @@ mod tests {
         }
 
         assert_eq!(storage.count_rows(), 500);
+    }
+
+    #[test]
+    fn test_duckdb_time_retention_deletes_old_rows() {
+        let dir = tempfile::tempdir().unwrap();
+        let db_path = dir.path().join("test.duckdb");
+        let storage = DuckDbStorage::new(&db_path).unwrap();
+
+        let points = vec![
+            make_point("metric", 1_000_000_000, 1.0),
+            make_point("metric", 2_000_000_000, 2.0),
+            make_point("metric", 3_000_000_000, 3.0),
+        ];
+        storage.insert_batch(&points).unwrap();
+
+        let stats = storage
+            .apply_retention(RetentionPolicy::new(0, std::time::Duration::from_secs(1)))
+            .unwrap();
+
+        assert_eq!(stats.rows_deleted, 1);
+        assert_eq!(storage.count_rows(), 2);
+    }
+
+    #[test]
+    fn test_duckdb_size_retention_deletes_old_rows() {
+        let dir = tempfile::tempdir().unwrap();
+        let db_path = dir.path().join("test.duckdb");
+        let storage = DuckDbStorage::new(&db_path).unwrap();
+
+        let points: Vec<_> = (0..100)
+            .map(|i| make_point("metric", i, i as f64))
+            .collect();
+        storage.insert_batch(&points).unwrap();
+
+        let mut policy = RetentionPolicy::new(1, std::time::Duration::ZERO);
+        policy.cleanup_interval = std::time::Duration::ZERO;
+        let stats = storage.apply_retention(policy).unwrap();
+
+        assert!(stats.rows_deleted > 0);
+        assert!(storage.count_rows() < 100);
     }
 
     #[test]

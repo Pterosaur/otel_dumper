@@ -1,6 +1,7 @@
 use crate::converter::FlatDataPoint;
 #[cfg(feature = "duckdb")]
 use crate::duckdb_storage::DuckDbStorage;
+use crate::retention::{RetentionPolicy, RetentionStats};
 use crate::storage::Storage as SqliteStorage;
 use std::fmt;
 use std::path::Path;
@@ -90,6 +91,14 @@ impl StorageBackend {
             StorageBackend::Sqlite(s) => Ok(s.create_analysis_indexes(dp_attr_keys)?),
             #[cfg(feature = "duckdb")]
             StorageBackend::DuckDb(s) => Ok(s.create_analysis_indexes(dp_attr_keys)?),
+        }
+    }
+
+    pub fn apply_retention(&self, policy: RetentionPolicy) -> Result<RetentionStats, StorageError> {
+        match self {
+            StorageBackend::Sqlite(s) => Ok(s.apply_retention(policy)?),
+            #[cfg(feature = "duckdb")]
+            StorageBackend::DuckDb(s) => Ok(s.apply_retention(policy)?),
         }
     }
 

@@ -1,10 +1,12 @@
 use crate::converter::FlatDataPoint;
+use crate::retention::{self, RetentionPolicy, RetentionStats};
 use rusqlite::{params, Connection};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 
 pub struct Storage {
     conn: Mutex<Connection>,
+    db_path: PathBuf,
 }
 
 impl Storage {
@@ -49,6 +51,7 @@ impl Storage {
 
         Ok(Storage {
             conn: Mutex::new(conn),
+            db_path: db_path.to_path_buf(),
         })
     }
 
@@ -137,6 +140,67 @@ impl Storage {
         Ok(())
     }
 
+    pub fn apply_retention(&self, policy: RetentionPolicy) -> rusqlite::Result<RetentionStats> {
+        if !policy.is_enabled() {
+            return Ok(RetentionStats::default());
+        }
+
+        let mut conn = self.conn.lock().unwrap();
+        let mut stats = RetentionStats {
+            bytes_before: retention::sqlite_database_size_bytes(&self.db_path),
+            ..RetentionStats::default()
+        };
+
+        if let Some(window_ns) = policy.time_window_ns() {
+            let latest_ts: Option<i64> = conn.query_row(
+                "SELECT MAX(timestamp_ns) FROM metric_data_points",
+                [],
+                |row| row.get(0),
+            )?;
+            if let Some(latest_ts) = latest_ts {
+                let cutoff = latest_ts.saturating_sub(window_ns);
+                let deleted = conn.execute(
+                    "DELETE FROM metric_data_points WHERE timestamp_ns < ?1",
+                    params![cutoff],
+                )?;
+                stats.rows_deleted += deleted as u64;
+            }
+        }
+
+        if let Some(target_bytes) = policy.size_target_bytes() {
+            let current_bytes = retention::sqlite_database_size_bytes(&self.db_path);
+            if current_bytes > policy.max_bytes {
+                let row_count: u64 =
+                    conn.query_row("SELECT COUNT(*) FROM metric_data_points", [], |row| {
+                        row.get::<_, i64>(0)
+                    })? as u64;
+                let rows_to_delete =
+                    retention::rows_to_delete_for_size(row_count, current_bytes, target_bytes);
+                if rows_to_delete > 0 {
+                    let tx = conn.transaction()?;
+                    let deleted = tx.execute(
+                        "DELETE FROM metric_data_points
+                         WHERE id IN (
+                             SELECT id FROM metric_data_points
+                             ORDER BY timestamp_ns, id
+                             LIMIT ?1
+                         )",
+                        params![rows_to_delete.min(i64::MAX as u64) as i64],
+                    )?;
+                    tx.commit()?;
+                    stats.rows_deleted += deleted as u64;
+
+                    conn.execute_batch("PRAGMA wal_checkpoint(TRUNCATE); VACUUM;")?;
+                }
+            }
+        } else if stats.rows_deleted > 0 {
+            conn.execute_batch("PRAGMA wal_checkpoint(TRUNCATE);")?;
+        }
+
+        stats.bytes_after = retention::sqlite_database_size_bytes(&self.db_path);
+        Ok(stats)
+    }
+
     /// Query row count (for testing).
     #[cfg(test)]
     pub fn count_rows(&self) -> i64 {
@@ -220,6 +284,46 @@ mod tests {
         }
 
         assert_eq!(storage.count_rows(), 500);
+    }
+
+    #[test]
+    fn test_storage_time_retention_deletes_old_rows() {
+        let dir = tempfile::tempdir().unwrap();
+        let db_path = dir.path().join("test.db");
+        let storage = Storage::new(&db_path).unwrap();
+
+        let points = vec![
+            make_point("metric", 1_000_000_000, 1.0),
+            make_point("metric", 2_000_000_000, 2.0),
+            make_point("metric", 3_000_000_000, 3.0),
+        ];
+        storage.insert_batch(&points).unwrap();
+
+        let stats = storage
+            .apply_retention(RetentionPolicy::new(0, std::time::Duration::from_secs(1)))
+            .unwrap();
+
+        assert_eq!(stats.rows_deleted, 1);
+        assert_eq!(storage.count_rows(), 2);
+    }
+
+    #[test]
+    fn test_storage_size_retention_deletes_oldest_rows() {
+        let dir = tempfile::tempdir().unwrap();
+        let db_path = dir.path().join("test.db");
+        let storage = Storage::new(&db_path).unwrap();
+
+        let points: Vec<_> = (0..100)
+            .map(|i| make_point("metric", i, i as f64))
+            .collect();
+        storage.insert_batch(&points).unwrap();
+
+        let mut policy = RetentionPolicy::new(1, std::time::Duration::ZERO);
+        policy.cleanup_interval = std::time::Duration::ZERO;
+        let stats = storage.apply_retention(policy).unwrap();
+
+        assert!(stats.rows_deleted > 0);
+        assert!(storage.count_rows() < 100);
     }
 
     #[test]

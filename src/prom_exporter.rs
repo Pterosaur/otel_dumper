@@ -1,7 +1,10 @@
 use crate::converter::FlatDataPoint;
 use std::collections::{HashMap, VecDeque};
 use std::sync::{Arc, Mutex};
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::time::{SystemTime, UNIX_EPOCH};
+
+pub use crate::retention::parse_duration_str;
+use std::time::Duration;
 
 /// Key for a unique metric time series: (metric_name, sorted_label_pairs)
 type SeriesKey = (String, Vec<(String, String)>);
@@ -400,29 +403,6 @@ fn escape_label_value(val: &str) -> String {
     val.replace('\\', "\\\\")
         .replace('"', "\\\"")
         .replace('\n', "\\n")
-}
-
-/// Parse a human-readable duration string like "30 mins", "24 hours", "5 days", "1h", "30m".
-pub fn parse_duration_str(s: &str) -> Option<Duration> {
-    let s = s.trim().to_lowercase();
-    // Try to split into number and unit
-    let (num_str, unit) = if let Some(pos) = s.find(|c: char| c.is_alphabetic()) {
-        (s[..pos].trim(), s[pos..].trim())
-    } else {
-        // Bare number = seconds
-        return s.parse::<f64>().ok().map(Duration::from_secs_f64);
-    };
-
-    let num: f64 = num_str.parse().ok()?;
-    let secs = match unit {
-        "s" | "sec" | "secs" | "second" | "seconds" => num,
-        "m" | "min" | "mins" | "minute" | "minutes" => num * 60.0,
-        "h" | "hr" | "hrs" | "hour" | "hours" => num * 3600.0,
-        "d" | "day" | "days" => num * 86400.0,
-        "w" | "week" | "weeks" => num * 604800.0,
-        _ => return None,
-    };
-    Some(Duration::from_secs_f64(secs))
 }
 
 /// Start the Prometheus-compatible HTTP server.

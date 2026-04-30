@@ -1,5 +1,6 @@
 use clap::Parser;
 use otel_dumper::config::Config;
+use otel_dumper::retention::RetentionPolicy;
 use otel_dumper::{
     grpc_server, http_server, jsonl_writer, prom_exporter, sqlite_api, storage_backend, writer,
 };
@@ -18,12 +19,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let config = Config::parse();
 
     tracing::info!(
-        "Starting otel_dumper: gRPC={}, HTTP={}, db={}, batch_size={}, flush_interval={}ms{}",
+        "Starting otel_dumper: gRPC={}, HTTP={}, db={}, batch_size={}, flush_interval={}ms, db_size_limit={} bytes, db_time_window={}s{}",
         config.grpc_port,
         config.http_port,
         config.db_path.display(),
         config.batch_size,
         config.flush_interval_ms,
+        config.db_size,
+        config.db_time_window.as_secs_f64(),
         config
             .jsonl_path
             .as_ref()
@@ -78,6 +81,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     });
 
     let (tx, rx) = tokio::sync::mpsc::channel(config.channel_capacity);
+    let retention_policy = RetentionPolicy::new(config.db_size, config.db_time_window);
 
     let (writer_handle, writer_shutdown) = writer::start_writer(
         rx,
@@ -87,6 +91,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         config.batch_size,
         Duration::from_millis(config.flush_interval_ms),
         config.max_rows,
+        retention_policy,
     );
 
     let mut grpc_handle = tokio::spawn({
